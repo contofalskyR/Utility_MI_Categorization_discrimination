@@ -72,7 +72,8 @@ launcher).
 
 `config_symmetric.js` is an overlay loaded after `config.js` that changes only what differs: `expName`
 `discrimination2024c` (the name both symmetric cohorts were collected under), the BC probe centre `.625` instead of
-`.616`, `build_version` ending in `_sym`, and QUEST `grain: 0.1` (what the symmetric Pavlovia build runs; the Quest port
+`.616`, the payoff for a correct C (`respCifC` 1 instead of 3 — the utility asymmetry itself; verified on the logged
+matrices of both symmetric cohorts), `build_version` ending in `_sym`, and QUEST `grain: 0.1` (what the symmetric Pavlovia build runs; the Quest port
 replays Robert's 2026-08-23 symmetric session to 5e-10 at that grain — set `0.01` for the asymmetric cohort's grid).
 Entry pages `quest_sym.html`, `psi_sym.html`, `questplus_sym.html`; single file:
 `python3 build/build_singlefile.py . Discrimination_online_v1.1.2_SYMMETRIC.html --overlay config_symmetric.js`. Both
@@ -244,6 +245,9 @@ Everything the Pavlovia CSV had is still there under the same names (`level_used
   lab machine the Python side is PsychoPy's own `QuestHandler` (open the script in the Coder and run it); elsewhere a
   pure-Python QUEST.m port. Current result: 12 cases, 472 steps, worst difference 3e-15.
 - `node tests/make_space_pool.mjs 40 2026 > spaces_pool.json` — the saved pool (acceptance 25.8 %, 3.9 draws per space).
+- `python3 tests/run_headless.py --url "http://127.0.0.1:8080/quest.html?smoke=1&survey_code=X" --participant '' --expect-redirect credited=X --out /tmp/r`
+  (with `redirect.completionUrl` pointing at e.g. `…/collect/ping?credited={survey_code}`) — a SONA-style session: survey code as participant id,
+  upload with the code, completion code in the closing dialog, and the page leaving for the completion URL after OK.
 - `node tests/worker_sona_test.mjs` — the Worker's SONA path in Node with an in-memory bucket and a fake SONA (grant, outage + manual retry, rejected code, listings).
 - `python3 tests/run_headless.py --url "http://127.0.0.1:8080/psi.html?smoke=1" --alpha .15 --beta 3 --fa .1 --out /tmp/r`
   — a complete session in headless Chromium with a simulated observer (consent, instructions, pre-test, game, post-test,

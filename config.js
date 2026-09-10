@@ -48,6 +48,9 @@ window.EXP_CONFIG = {
     { label: 'shape_difference0', featureIndex: 0 },
     { label: 'shape_difference1', featureIndex: 1 },
   ],
+  // Payoff matrix of the categorization game (points; the delays derive from them): resp<given>if<true>. The asymmetric
+  // study rewards a correct C with 3; the symmetric study (config_symmetric.js) with 1. B/C confusions cost 3 in both.
+  utility: { respAifA: 1, respAifB: -1, respAifC: -1, respBifA: -1, respBifB: 1, respBifC: -3, respCifA: -1, respCifB: -3, respCifC: 3 },
   // discrimination_parameters rows: [centre_x, centre_y, vector_x, vector_y] — asymmetric build (AB at .375, BC at .616).
   // The symmetric build ([[0.375, 0.5, 1, 0], [0.625, 0.5, 1, 0]]) is config_symmetric.js, loaded after this file.
   discriminationParameters: [[0.375, 0.5, 1, 0], [0.616, 0.5, 1, 0]],

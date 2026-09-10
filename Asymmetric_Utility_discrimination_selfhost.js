@@ -631,7 +631,20 @@ async function experimentInit() {
   respBifC = (- 3);
   respAifC = (- 1);
   respCifA = (- 1);
+  // config.utility overrides the payoff entries (the symmetric study sets respCifC = 1; everything else is the Builder default)
+  if (CONFIG.utility) {
+    if (CONFIG.utility.respAifA !== undefined) respAifA = CONFIG.utility.respAifA;
+    if (CONFIG.utility.respAifB !== undefined) respAifB = CONFIG.utility.respAifB;
+    if (CONFIG.utility.respAifC !== undefined) respAifC = CONFIG.utility.respAifC;
+    if (CONFIG.utility.respBifA !== undefined) respBifA = CONFIG.utility.respBifA;
+    if (CONFIG.utility.respBifB !== undefined) respBifB = CONFIG.utility.respBifB;
+    if (CONFIG.utility.respBifC !== undefined) respBifC = CONFIG.utility.respBifC;
+    if (CONFIG.utility.respCifA !== undefined) respCifA = CONFIG.utility.respCifA;
+    if (CONFIG.utility.respCifB !== undefined) respCifB = CONFIG.utility.respCifB;
+    if (CONFIG.utility.respCifC !== undefined) respCifC = CONFIG.utility.respCifC;
+  }
   utilitymatrix = [[respAifA, respBifA, respCifA], [respAifB, respBifB, respCifB], [respAifC, respBifC, respCifC]];
+  window.__EXP.utilitymatrix = utilitymatrix;
   maxTrials = SMOKE ? CONFIG.smoke.catTrials : 300;
   proportionToFinish = 0.5;
   Req_points = (proportionToFinish * maxTrials);
