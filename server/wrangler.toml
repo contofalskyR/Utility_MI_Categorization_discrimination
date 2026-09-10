@@ -1,0 +1,14 @@
+# wrangler.toml — deploy the data endpoint with `npx wrangler deploy` from this folder (npm i -g wrangler; wrangler login).
+# Secrets are set once with:  npx wrangler secret put COLLECT_TOKEN   /   ADMIN_TOKEN   /   SONA_CREDIT_URL (optional)
+# Storage: keep ONE of the two blocks below. R2 (10 GB free) needs a card on file; Workers KV (1 GB free) does not.
+name = "discrimination-collect"
+main = "cloudflare-worker.js"
+compatibility_date = "2025-06-01"
+
+[[r2_buckets]]
+binding = "DATA"
+bucket_name = "discrimination-data"
+
+# [[kv_namespaces]]
+# binding = "DATA_KV"
+# id = "<paste the namespace id from Workers & Pages -> KV>"
