@@ -151,6 +151,9 @@ patch("""var feature_space;
 var discrimination_parameters;
 """, """var feature_space;
 var subspace_redraws;
+var subspace_redraws_rotation;
+var subspace_rot_gap_ab;
+var subspace_rot_gap_bc;
 var subspace_min_radius;
 var subspace_gain_u;
 var subspace_gain_v;
@@ -211,10 +214,11 @@ patch("""  // Run 'Begin Experiment' code from DiscrimParameters
   console.log("Window size:", psychoJS.window ? psychoJS.window.size : "undefined");
 """, """  // Run 'Begin Experiment' code from DiscrimParameters
   D = 4;
-  // self-hosted build: redraw rule — reject a feature subspace whose contour radius (0.3 + deviation) drops below
-  // CONFIG.redraw.minRadius anywhere the experiment can show (the six corners of the reachable support; the radius is
-  // affine in the subspace coordinates, so the corners bound it). Replaces the old maxVal > 1.5 rescaling, which only
-  // touched u/v and did not prevent folded shapes.
+  // self-hosted build: fold screen — the feature subspace is drawn exactly as the Pavlovia build drew it (create_subspace,
+  // then u / v rescaled when a component exceeds 1.5) and drawn again when the contour radius (0.3 + deviation) at the 50
+  // rendered angles falls below CONFIG.redraw.minRadius (a small tolerance above 0) at any corner of the region the
+  // experiment can show (the radius is affine in x, y, so the six corners bound it). Accepted subspaces are untouched, so
+  // every shape shown is one the old build could have shown; only the folded ones are excluded.
   function min_contour_radius(subspace, coords_list) {
       var o = subspace[0], u = subspace[1], v = subspace[2];
       var N = 50, m = 10.0;
@@ -246,29 +250,136 @@ patch("""  // Run 'Begin Experiment' code from DiscrimParameters
           if (pick) { feature_space = [pick.origin.slice(), pick.u.slice(), pick.v.slice()]; space_id = pick.id; space_source = 'pool'; }
       } catch (e) { console.error('space pool unavailable, drawing a fresh space instead', e); }
   }
-  // (b) a fresh draw, screened by the redraw rule; or (c) the pavlovia behaviour when the rule is disabled
-  if (feature_space === null) {
-      feature_space = create_subspace(D);
-      if (CONFIG.redraw.enabled) {
-          while (min_contour_radius(feature_space, CHECK_COORDS) < CONFIG.redraw.minRadius && subspace_redraws < CONFIG.redraw.maxRedraws) {
-              feature_space = create_subspace(D);
-              subspace_redraws = subspace_redraws + 1;
-          }
+  // Astra's centred affine model (2026-09-10, CONFIG.subspace.model = 'affine'): p(x, y) = B·n + K[(x − .5)·e_x + (y − .5)·e_y]
+  // with n, e_x, e_y an orthonormal frame in the three visible harmonics — the fixed frame n = (1,1,1)/√3, e_x = (1,0,−1)/√2,
+  // e_y = (1,−2,1)/√6, or a uniformly random orthonormal frame per session (frame: 'random'). Visible gain exactly K on both
+  // axes, axes orthogonal, and the contour radius stays ≥ .0548 everywhere the task can show for B = 1.25, K = 1.33
+  // (analytic certificate, any frame) — no fold, no rescale, no redraw. The k = 0 component is 0 (it never moves the contour).
+  function create_subspace_affine(D) {
+      if (D !== 4) throw new Error('the affine subspace model needs D = 4');
+      var cfg = (CONFIG.subspace && CONFIG.subspace.affine) || {};
+      var B = (cfg.B !== undefined) ? cfg.B : 1.25, K = (cfg.K !== undefined) ? cfg.K : 1.33;
+      var n, ex, ey;
+      if (cfg.frame === 'random') {
+          function gauss() { var u1 = Math.random() || 1e-12, u2 = Math.random(); return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2); }
+          function nrm(w) { var l = Math.sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]); return [w[0] / l, w[1] / l, w[2] / l]; }
+          function d3(p, q) { return p[0] * q[0] + p[1] * q[1] + p[2] * q[2]; }
+          var a = [gauss(), gauss(), gauss()], b = [gauss(), gauss(), gauss()], c = [gauss(), gauss(), gauss()];
+          n = nrm(a);                                                                   // Gram–Schmidt: a uniformly random orthonormal frame
+          var t = d3(b, n); ex = nrm([b[0] - t * n[0], b[1] - t * n[1], b[2] - t * n[2]]);
+          var t1 = d3(c, n), t2 = d3(c, ex); ey = nrm([c[0] - t1 * n[0] - t2 * ex[0], c[1] - t1 * n[1] - t2 * ex[1], c[2] - t1 * n[2] - t2 * ex[2]]);
       } else {
-          for (let i = 1; i < feature_space.length; i++) {          // pavlovia build: rescale u / v when a component exceeds 1.5
-              let vec = feature_space[i];
+          n = [1 / Math.sqrt(3), 1 / Math.sqrt(3), 1 / Math.sqrt(3)]; ex = [1 / Math.sqrt(2), 0, -1 / Math.sqrt(2)]; ey = [1 / Math.sqrt(6), -2 / Math.sqrt(6), 1 / Math.sqrt(6)];
+      }
+      var u = [0, K * ex[0], K * ex[1], K * ex[2]], v = [0, K * ey[0], K * ey[1], K * ey[2]], base = [0, B * n[0], B * n[1], B * n[2]];
+      var origin = base.map(function (x, i) { return x - 0.5 * (u[i] + v[i]); });      // so that p = origin + x·u + y·v as everywhere else
+      return [origin, u, v];
+  }
+  // (b) the Pavlovia generator: create_subspace, then u / v rescaled when a component exceeds 1.5 (CONFIG.redraw.rescale)
+  function draw_feature_space() {
+      if (CONFIG.subspace && CONFIG.subspace.model === 'affine') return create_subspace_affine(D);
+      var fs = create_subspace(D);
+      if (CONFIG.redraw.rescale !== false) {
+          for (let i = 1; i < fs.length; i++) {
+              let vec = fs[i];
               let maxVal = Math.max(...vec.map(Math.abs));
-              if (maxVal > 1.5) { feature_space[i] = vec.map(v => v / maxVal); }
+              if (maxVal > 1.5) { fs[i] = vec.map(v => v / maxVal); }
           }
+      }
+      return fs;
+  }
+  // (c') the rotation screen (candidate design change, 2026-09-11; CONFIG.redraw.minRotatedGap > 0 switches it on, default 0 = off).
+  // Astra's finding on run 932457: when a harmonic coefficient changes sign between two category means, the two means differ
+  // in that harmonic only by a rotation (flipping the sign of harmonic k is a rotation by 180/k degrees), and the training
+  // phase rotates every exemplar at random — so A and B can be near-identical for the participant. The criterion is the
+  // contour gap between the category means after the best relative rotation (the metric of scripts/rotation_lottery.py:
+  // arc-length-resampled polygons, centroid removed, symmetric closest-point RMS, rotation searched on a 36-angle grid with a
+  // golden-section refinement); the plane is drawn again while the smaller of the A/B and B/C gaps is below minRotatedGap.
+  function contour_polygon(par) {                                                   // the 50-vertex polygon the experiment draws
+      var N = 50, pts = [];
+      for (var i = 0; i < N; i++) {
+          var dev = 0;
+          for (var k = 0; k < par.length; k++) dev = dev + 0.1 * par[k] * Math.sin(k * (i - 1) * (2 * Math.PI / N));
+          pts.push([(0.3 + dev) * Math.cos(i * 2 * Math.PI / N), (0.3 + dev) * Math.sin(i * 2 * Math.PI / N)]);
+      }
+      return pts;
+  }
+  function resample_centred(P, M) {                                                 // closed polygon -> M points equally spaced along the perimeter, centroid removed
+      var Q = P.concat([P[0]]), s = [0];
+      for (var i = 1; i < Q.length; i++) s.push(s[i - 1] + Math.hypot(Q[i][0] - Q[i - 1][0], Q[i][1] - Q[i - 1][1]));
+      var L = s[s.length - 1], out = [], j = 0, cx = 0, cy = 0;
+      for (var m = 0; m < M; m++) {
+          var t = L * m / M;
+          while (j < s.length - 2 && s[j + 1] < t) j++;
+          var f = (t - s[j]) / ((s[j + 1] - s[j]) || 1e-12);
+          var x = Q[j][0] + f * (Q[j + 1][0] - Q[j][0]), y = Q[j][1] + f * (Q[j + 1][1] - Q[j][1]);
+          out.push([x, y]); cx += x; cy += y;
+      }
+      cx /= M; cy /= M;
+      return out.map(function (q) { return [q[0] - cx, q[1] - cy]; });
+  }
+  function pt_seg_rms(P, Q) {                                                       // RMS over the points of P of the distance to the closed polyline Q
+      var tot = 0, n = Q.length;
+      for (var a = 0; a < P.length; a++) {
+          var best = Infinity, px = P[a][0], py = P[a][1];
+          for (var b = 0; b < n; b++) {
+              var ax = Q[b][0], ay = Q[b][1], bx = Q[(b + 1) % n][0], by = Q[(b + 1) % n][1];
+              var dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy + 1e-12;
+              var t = ((px - ax) * dx + (py - ay) * dy) / l2; t = t < 0 ? 0 : (t > 1 ? 1 : t);
+              var ex = px - (ax + t * dx), ey = py - (ay + t * dy), d2 = ex * ex + ey * ey;
+              if (d2 < best) best = d2;
+          }
+          tot += best;
+      }
+      return Math.sqrt(tot / P.length);
+  }
+  function rotate_pts(Q, phi) { var c = Math.cos(phi), s = Math.sin(phi); return Q.map(function (q) { return [q[0] * c - q[1] * s, q[0] * s + q[1] * c]; }); }
+  function rotated_gap(par1, par2) {                                                // contour gap after the best relative rotation
+      var P = resample_centred(contour_polygon(par1), 160), Q = resample_centred(contour_polygon(par2), 160);
+      var g = function (phi) { var R = rotate_pts(Q, phi); return 0.5 * (pt_seg_rms(P, R) + pt_seg_rms(R, P)); };
+      var NR = 36, vals = [], best = 0;
+      for (var i = 0; i < NR; i++) { vals.push(g(2 * Math.PI * i / NR)); if (vals[i] < vals[best]) best = i; }
+      var lo = 2 * Math.PI * best / NR - 2 * Math.PI / NR, hi = 2 * Math.PI * best / NR + 2 * Math.PI / NR;
+      for (var it = 0; it < 10; it++) {
+          var a = hi - 0.618 * (hi - lo), b = lo + 0.618 * (hi - lo);
+          if (g(a) < g(b)) hi = b; else lo = a;
+      }
+      return Math.min(vals[best], g(0.5 * (lo + hi)));
+  }
+  function category_gaps(subspace) {                                                // [A/B gap, B/C gap] between the category means (.25,.5), (.5,.5), (.75,.5)
+      var o = subspace[0], u = subspace[1], v = subspace[2];
+      var par = function (x, y) { return vector_plus(vector_plus(o, scalar_product(x, u)), scalar_product(y, v)); };
+      var A = par(0.25, 0.5), B = par(0.5, 0.5), C = par(0.75, 0.5);
+      return [rotated_gap(A, B), rotated_gap(B, C)];
+  }
+  var MIN_ROT_GAP = (CONFIG.redraw.minRotatedGap > 0) ? CONFIG.redraw.minRotatedGap : 0;
+  subspace_redraws_rotation = 0;
+  function plane_rejected(fs) {
+      if (CONFIG.redraw.enabled && min_contour_radius(fs, CHECK_COORDS) < CONFIG.redraw.minRadius) return 'fold';
+      if (MIN_ROT_GAP > 0) { var gg = category_gaps(fs); if (Math.min(gg[0], gg[1]) < MIN_ROT_GAP) return 'rotation'; }
+      return null;
+  }
+  // (c) the screens: draw again while the contour would fold anywhere the experiment can show (CONFIG.redraw.enabled), or, when
+  // the rotation screen is on, while the category means are near-rotations of each other
+  if (feature_space === null) {
+      feature_space = draw_feature_space();
+      var why = plane_rejected(feature_space);
+      while (why !== null && subspace_redraws < CONFIG.redraw.maxRedraws) {
+          feature_space = draw_feature_space();
+          subspace_redraws = subspace_redraws + 1;
+          if (why === 'rotation') subspace_redraws_rotation = subspace_redraws_rotation + 1;
+          why = plane_rejected(feature_space);
       }
   }
   subspace_min_radius = min_contour_radius(feature_space, CHECK_COORDS);
+  var _gaps = category_gaps(feature_space); subspace_rot_gap_ab = _gaps[0]; subspace_rot_gap_bc = _gaps[1];
   // visible gain of each direction: the k = 0 harmonic does not move the contour (sin(0) = 0), so only components 1..D-1 count
   subspace_gain_u = Math.sqrt(feature_space[1].slice(1).reduce(function (a, x) { return a + x * x; }, 0));
   subspace_gain_v = Math.sqrt(feature_space[2].slice(1).reduce(function (a, x) { return a + x * x; }, 0));
   discrimination_parameters = CONFIG.discriminationParameters.map(function (r) { return r.slice(); });
-  console.log("feature_space:", JSON.stringify(feature_space), "source:", space_source, space_id, "redraws:", subspace_redraws, "min contour radius:", subspace_min_radius, "gain u/v:", subspace_gain_u, subspace_gain_v);
+  console.log("feature_space:", JSON.stringify(feature_space), "source:", space_source, space_id, "redraws:", subspace_redraws, "(rotation:", subspace_redraws_rotation, ") min contour radius:", subspace_min_radius, "gain u/v:", subspace_gain_u, subspace_gain_v, "rotated gaps A/B, B/C:", subspace_rot_gap_ab, subspace_rot_gap_bc, "min required:", MIN_ROT_GAP);
   window.__EXP.feature_space = feature_space; window.__EXP.subspace_redraws = subspace_redraws; window.__EXP.subspace_min_radius = subspace_min_radius; window.__EXP.space_id = space_id;
+  window.__EXP.subspace_rot_gap_ab = subspace_rot_gap_ab; window.__EXP.subspace_rot_gap_bc = subspace_rot_gap_bc; window.__EXP.subspace_redraws_rotation = subspace_redraws_rotation; window.__EXP.min_rotated_gap = MIN_ROT_GAP;
 """)
 
 # ----------------------------------------------------------------------------------------------- 8. feedback image placeholder
@@ -348,6 +459,8 @@ function logSessionColumns() {
   psychoJS.experiment.addData('adaptive_method', ADAPTIVE_METHOD);
   psychoJS.experiment.addData('subspace_redraws', subspace_redraws);
   psychoJS.experiment.addData('subspace_min_radius', subspace_min_radius);
+  psychoJS.experiment.addData('subspace_rot_gap_ab', subspace_rot_gap_ab); psychoJS.experiment.addData('subspace_rot_gap_bc', subspace_rot_gap_bc);   // category-mean contour gaps after the best rotation (rotation screen, 2026-09-11)
+  psychoJS.experiment.addData('subspace_redraws_rotation', subspace_redraws_rotation); psychoJS.experiment.addData('subspace_min_rotated_gap', (CONFIG.redraw.minRotatedGap > 0) ? CONFIG.redraw.minRotatedGap : 0);
   psychoJS.experiment.addData('subspace_center', JSON.stringify(feature_space[0]));
   psychoJS.experiment.addData('subspace_vector1', JSON.stringify(feature_space[1]));
   psychoJS.experiment.addData('subspace_vector2', JSON.stringify(feature_space[2]));
@@ -356,6 +469,7 @@ function logSessionColumns() {
   psychoJS.experiment.addData('subspace_gain_v', subspace_gain_v);
   psychoJS.experiment.addData('space_id', (space_id === null) ? '' : space_id);
   psychoJS.experiment.addData('space_source', space_source);
+  psychoJS.experiment.addData('subspace_model', (CONFIG.subspace && CONFIG.subspace.model === 'affine') ? ('affine_' + ((CONFIG.subspace.affine && CONFIG.subspace.affine.frame) || 'fixed') + '_B' + ((CONFIG.subspace.affine && CONFIG.subspace.affine.B) || 1.25) + '_K' + ((CONFIG.subspace.affine && CONFIG.subspace.affine.K) || 1.33)) : 'legacy');
   psychoJS.experiment.addData('shape_size_height_units', 0.25);
   try { psychoJS.experiment.addData('window_size_px', JSON.stringify(psychoJS.window.size)); psychoJS.experiment.addData('device_pixel_ratio', window.devicePixelRatio); } catch (e) {}
 }
@@ -783,6 +897,7 @@ function measureAntialias() {
   try {
     const win = psychoJS.window, r = win._renderer, gl = r ? r.gl : null;
     if (!gl) return { gray_levels: 'no-gl', intermediate_px: '', samples: '' };
+    const ori0 = Shape1.ori, pos0 = Shape1.pos;                       // v1.1.4: the probe must leave the stimulus exactly as it found it (v1.1.0–v1.1.3 left Shape1 at 20 deg for the whole session — Astra's audit, 2026-09-11)
     Shape1.setOri(20); Shape1.setPos([0, 0]); Shape1.setAutoDraw(true);
     win.render();
     const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
@@ -792,9 +907,9 @@ function measureAntialias() {
     gl.readPixels(cx - box / 2, cy - box / 2, box, box, gl.RGBA, gl.UNSIGNED_BYTE, buf);
     const levels = new Set(); let inter = 0;
     for (let i = 0; i < box * box; i++) { const v = buf[i * 4]; if (v > 12 && v < 243) inter++; levels.add(v >> 3); }
-    Shape1.setAutoDraw(false); win.render();
+    Shape1.setAutoDraw(false); Shape1.setOri(ori0 || 0); Shape1.setPos(pos0 || [0, 0]); win.render();
     return { gray_levels: levels.size, intermediate_px: inter, samples: gl.getParameter(gl.SAMPLES), dpr: window.devicePixelRatio, buffer: [W, H] };
-  } catch (e) { return { gray_levels: 'error', intermediate_px: '', samples: '', error: String(e) }; }
+  } catch (e) { try { Shape1.setAutoDraw(false); Shape1.setOri(0); } catch (e2) {} return { gray_levels: 'error', intermediate_px: '', samples: '', error: String(e) }; }
 }
 """)
 patch("""  psychoJS.experiment.addData('gl_antialias', glAntialias());
@@ -854,11 +969,14 @@ patch("""    Shape1.setPos([position1x, position1y]);
     Shape1.setVertices(shape1);
     Shape2.setPos([position2x, position2y]);
     Shape2.setVertices(shape2);
+    psychoJS.experiment.addData('shape1_ori_applied', Shape1.ori); psychoJS.experiment.addData('shape2_ori_applied', Shape2.ori);   // v1.1.4: the orientations actually drawn (both 0, as in the original builds)
     Object.assign(window.__EXP.trial, {   // debug overlay: everything this trial is made of
       feature_index: feature_index, feature_center: feature_center.slice(), feature_vector: feature_vector.slice(), coord1: coord1.slice(), coord2: coord2.slice(),
       params1: vector_plus(vector_plus(feature_space[0], scalar_product(coord1[0], feature_space[1])), scalar_product(coord1[1], feature_space[2])),
       params2: vector_plus(vector_plus(feature_space[0], scalar_product(coord2[0], feature_space[1])), scalar_product(coord2[1], feature_space[2])),
-      position1: [position1x, position1y], position2: [position2x, position2y], orientation1: orientation1, orientation2: orientation2, vertices1: shape1, vertices2: shape2 });
+      position1: [position1x, position1y], position2: [position2x, position2y], orientation1: Shape1.ori, orientation2: Shape2.ori, orientation_sampled_unused: [orientation1, orientation2], vertices1: shape1, vertices2: shape2 });
+    // note (2026-09-11): orientation1/2 are sampled by the original code but never applied — the original lab and Pavlovia builds
+    // show both discrimination shapes at 0 deg (only position and vertices are set). Kept as is; orientation1/2 above are the applied values.
 """)
 patch("""      window.__EXP.lastResult = { phase: currentPhaseName, label: currentPlan.label, n: currentPlan.staircase.n, level: level, isCatch: is_catch, saidDifferent: saidDifferent, correct: stairResult.correct, est_alpha: stairResult.est_alpha, finished: currentPlan.staircase.finished, allFinished: currentInterleaver.finished };
 """, """      window.__EXP.lastResult = { phase: currentPhaseName, label: currentPlan.label, n: currentPlan.staircase.n, level: level, isCatch: is_catch, saidDifferent: saidDifferent, correct: stairResult.correct, est_alpha: stairResult.est_alpha, finished: currentPlan.staircase.finished, allFinished: currentInterleaver.finished, key: Resp_s_or_d.keys, rt: Resp_s_or_d.rt, est: stairResult };
@@ -919,6 +1037,24 @@ patch("""async function quitPsychoJS(message, isCompleted) {
 """, """async function quitPsychoJS(message, isCompleted) {
   if (isCompleted && CONFIG.sona && CONFIG.sona.showCompletionCode) message = message + completionCodeHtml();   // the closing dialog stays until OK: the code is readable and copyable
   // Check for and save orphaned data
+""")
+
+# ----------------------------------------------------------------------------------------------- 30. utility matrix from config (symmetric study: respCifC = 1)
+patch("""  utilitymatrix = [[respAifA, respBifA, respCifA], [respAifB, respBifB, respCifB], [respAifC, respBifC, respCifC]];
+""", """  // config.utility overrides the payoff entries (the symmetric study sets respCifC = 1; everything else is the Builder default)
+  if (CONFIG.utility) {
+    if (CONFIG.utility.respAifA !== undefined) respAifA = CONFIG.utility.respAifA;
+    if (CONFIG.utility.respAifB !== undefined) respAifB = CONFIG.utility.respAifB;
+    if (CONFIG.utility.respAifC !== undefined) respAifC = CONFIG.utility.respAifC;
+    if (CONFIG.utility.respBifA !== undefined) respBifA = CONFIG.utility.respBifA;
+    if (CONFIG.utility.respBifB !== undefined) respBifB = CONFIG.utility.respBifB;
+    if (CONFIG.utility.respBifC !== undefined) respBifC = CONFIG.utility.respBifC;
+    if (CONFIG.utility.respCifA !== undefined) respCifA = CONFIG.utility.respCifA;
+    if (CONFIG.utility.respCifB !== undefined) respCifB = CONFIG.utility.respCifB;
+    if (CONFIG.utility.respCifC !== undefined) respCifC = CONFIG.utility.respCifC;
+  }
+  utilitymatrix = [[respAifA, respBifA, respCifA], [respAifB, respBifB, respCifB], [respAifC, respBifC, respCifC]];
+  window.__EXP.utilitymatrix = utilitymatrix;
 """)
 
 os.makedirs(out_dir, exist_ok=True)

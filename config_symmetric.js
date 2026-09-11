@@ -5,7 +5,7 @@
  * other than the grain, redraw screen, logging — is config.js unchanged.
  */
 Object.assign(window.EXP_CONFIG, {
-  buildVersion: 'selfhost_v1.1.2_2026-09-09_sym',
+  buildVersion: 'selfhost_v1.1.5_2026-09-11_sym',
   expName: 'discrimination2024c',                 // the name both symmetric cohorts (lab Nov-Dec 2025, online Aug 2026) were collected under
   condition: 'symmetric',
   // BC probes at the midpoint between B (.5) and C (.75) instead of the utility-shifted .616 of the asymmetric study

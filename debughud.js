@@ -71,6 +71,7 @@ export function installDebugHud(psychoJS, CONFIG) {
     lines.push(`build=${E.build}`);
     if (fs) {
       lines.push(`space: ${E.space_id !== undefined && E.space_id !== null ? '#' + E.space_id + ' (pool)' : 'fresh draw'}   redraws=${f(E.subspace_redraws, 0)}   min radius=${f(E.subspace_min_radius)}   visible gain u=${f(gain(fs[1]), 3)} v=${f(gain(fs[2]), 3)}`);
+      if (E.subspace_rot_gap_ab !== undefined) lines.push(`rotated category gaps: A/B=${f(E.subspace_rot_gap_ab, 4)}  B/C=${f(E.subspace_rot_gap_bc, 4)}   (cohort median .0138; min required ${E.min_rotated_gap > 0 ? f(E.min_rotated_gap, 3) : 'off'}; redraws for rotation=${f(E.subspace_redraws_rotation, 0)})`);
       lines.push(`  origin ${vec(fs[0])}   u ${vec(fs[1])}`);
       lines.push(`  v      ${vec(fs[2])}   shape params = origin + x·u + y·v`);
     } else lines.push('space: not drawn yet');
@@ -86,7 +87,7 @@ export function installDebugHud(psychoJS, CONFIG) {
       lines.push(`  level ${f(tr.level, 4)} (raw ${f(tr.rawLevel, 4)})   ${tr.isCatch ? 'IDENTICAL PAIR (catch) → correct key "s"' : 'different pair → correct key "d"'}`);
       lines.push(`  coord1 ${vec(tr.coord1)}   coord2 ${vec(tr.coord2)}   = centre ± level·vector, separation ${f(2 * tr.level, 3)}`);
       lines.push(`  params1 ${vec(tr.params1)}   params2 ${vec(tr.params2)}   |Δ| ${f(dist(tr.params1, tr.params2), 3)}`);
-      lines.push(`  screen: shape1 pos ${vec(tr.position1, 2)} ori ${f(tr.orientation1, 0)}°   shape2 pos ${vec(tr.position2, 2)} ori ${f(tr.orientation2, 0)}°`);
+      lines.push(`  screen: shape1 pos ${vec(tr.position1, 2)} ori ${f(tr.orientation1, 0)}° applied   shape2 pos ${vec(tr.position2, 2)} ori ${f(tr.orientation2, 0)}° applied   (random orientations are sampled but never applied — original behaviour)`);
     } else lines.push('no trial yet');
     lines.push('');
     if (lr.phase === 'Categorization') {

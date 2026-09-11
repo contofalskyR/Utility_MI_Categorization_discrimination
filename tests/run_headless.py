@@ -29,6 +29,7 @@ async def main():
     ap.add_argument('--seed', type=int, default=None)
     ap.add_argument('--screenshots', type=int, default=6)
     ap.add_argument('--headed', action='store_true')
+    ap.add_argument('--expect-redirect', default=None, help='substring the final URL must contain (tests config.redirect.completionUrl)')
     a = ap.parse_args()
     rng = random.Random(a.seed)
     os.makedirs(a.out, exist_ok=True)
@@ -62,11 +63,17 @@ async def main():
                 try:
                     await page.wait_for_selector('#dialogOK:visible', timeout=90000)
                     summary['closing_dialog'] = await page.evaluate("() => { const d = document.querySelector('#experiment-dialog .scrollable-container'); return d ? d.innerText : null; }")
+                    summary['datasaver_before_redirect'] = await page.evaluate("() => (window.__DATASAVER || {})")
                     await page.click('#dialogOK:visible')
                 except Exception as e:
                     errors.append('closing dialog: ' + str(e))
                 await asyncio.sleep(0.5)
-                st2 = await page.evaluate("() => (window.__DATASAVER || {})")
+                if a.expect_redirect:   # config.redirect.completionUrl set: the page must leave for it after OK
+                    try:
+                        await page.wait_for_url(lambda u: a.expect_redirect in u, timeout=15000); summary['redirected_to'] = page.url
+                    except Exception as e:
+                        errors.append('no redirect: ' + str(e)); summary['redirected_to'] = page.url
+                st2 = (await page.evaluate("() => (window.__DATASAVER || {})")) if not a.expect_redirect else summary.get('datasaver_before_redirect', {})
                 summary['datasaver'] = st2; finished = True
                 break
             if r == 'Consent' and rkey != last_routine_key:

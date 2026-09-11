@@ -128,10 +128,13 @@
 +  psychoJS.setRedirectUrls(fillUrl(CONFIG.redirect.completionUrl, urlValues) || undefined, fillUrl(CONFIG.redirect.cancellationUrl, urlValues) || undefined);
  
  
-@@ -221,4 +273,13 @@
+@@ -221,4 +273,16 @@
  var blue;
  var feature_space;
 +var subspace_redraws;
++var subspace_redraws_rotation;
++var subspace_rot_gap_ab;
++var subspace_rot_gap_bc;
 +var subspace_min_radius;
 +var subspace_gain_u;
 +var subspace_gain_v;
@@ -142,21 +145,35 @@
 +var currentBlock;
  var discrimination_parameters;
  var weight_vectorA;
-@@ -278,4 +339,6 @@
+@@ -278,4 +342,6 @@
    // Run 'Begin Experiment' code from SetupCode
    function norm(vec) {
 +      // original build: two-component norm (kept as the design; CONFIG.normFullD = true switches to the full-D norm — Jacob's call)
 +      if (CONFIG.normFullD) { var s = 0; for (var q = 0; q < vec.length; q++) s = s + vec[q] * vec[q]; return Math.pow(s, 0.5); }
        var x, y;
        x = vec[0];
-@@ -570,5 +633,5 @@
+@@ -569,6 +635,19 @@
+   respAifC = (- 1);
    respCifA = (- 1);
++  // config.utility overrides the payoff entries (the symmetric study sets respCifC = 1; everything else is the Builder default)
++  if (CONFIG.utility) {
++    if (CONFIG.utility.respAifA !== undefined) respAifA = CONFIG.utility.respAifA;
++    if (CONFIG.utility.respAifB !== undefined) respAifB = CONFIG.utility.respAifB;
++    if (CONFIG.utility.respAifC !== undefined) respAifC = CONFIG.utility.respAifC;
++    if (CONFIG.utility.respBifA !== undefined) respBifA = CONFIG.utility.respBifA;
++    if (CONFIG.utility.respBifB !== undefined) respBifB = CONFIG.utility.respBifB;
++    if (CONFIG.utility.respBifC !== undefined) respBifC = CONFIG.utility.respBifC;
++    if (CONFIG.utility.respCifA !== undefined) respCifA = CONFIG.utility.respCifA;
++    if (CONFIG.utility.respCifB !== undefined) respCifB = CONFIG.utility.respCifB;
++    if (CONFIG.utility.respCifC !== undefined) respCifC = CONFIG.utility.respCifC;
++  }
    utilitymatrix = [[respAifA, respBifA, respCifA], [respAifB, respBifB, respCifB], [respAifC, respBifC, respCifC]];
 -  maxTrials = 300;
++  window.__EXP.utilitymatrix = utilitymatrix;
 +  maxTrials = SMOKE ? CONFIG.smoke.catTrials : 300;
    proportionToFinish = 0.5;
    Req_points = (proportionToFinish * maxTrials);
-@@ -580,24 +643,62 @@
+@@ -580,24 +659,170 @@
    // Run 'Begin Experiment' code from DiscrimParameters
    D = 4;
 -  feature_space = create_subspace(D);
@@ -179,10 +196,11 @@
 -  console.log("feature_space created:", JSON.stringify(feature_space));
 -  console.log("Window exists?", typeof psychoJS.window);
 -  console.log("Window size:", psychoJS.window ? psychoJS.window.size : "undefined");
-+  // self-hosted build: redraw rule — reject a feature subspace whose contour radius (0.3 + deviation) drops below
-+  // CONFIG.redraw.minRadius anywhere the experiment can show (the six corners of the reachable support; the radius is
-+  // affine in the subspace coordinates, so the corners bound it). Replaces the old maxVal > 1.5 rescaling, which only
-+  // touched u/v and did not prevent folded shapes.
++  // self-hosted build: fold screen — the feature subspace is drawn exactly as the Pavlovia build drew it (create_subspace,
++  // then u / v rescaled when a component exceeds 1.5) and drawn again when the contour radius (0.3 + deviation) at the 50
++  // rendered angles falls below CONFIG.redraw.minRadius (a small tolerance above 0) at any corner of the region the
++  // experiment can show (the radius is affine in x, y, so the six corners bound it). Accepted subspaces are untouched, so
++  // every shape shown is one the old build could have shown; only the folded ones are excluded.
 +  function min_contour_radius(subspace, coords_list) {
 +      var o = subspace[0], u = subspace[1], v = subspace[2];
 +      var N = 50, m = 10.0;
@@ -214,45 +232,152 @@
 +          if (pick) { feature_space = [pick.origin.slice(), pick.u.slice(), pick.v.slice()]; space_id = pick.id; space_source = 'pool'; }
 +      } catch (e) { console.error('space pool unavailable, drawing a fresh space instead', e); }
 +  }
-+  // (b) a fresh draw, screened by the redraw rule; or (c) the pavlovia behaviour when the rule is disabled
-+  if (feature_space === null) {
-+      feature_space = create_subspace(D);
-+      if (CONFIG.redraw.enabled) {
-+          while (min_contour_radius(feature_space, CHECK_COORDS) < CONFIG.redraw.minRadius && subspace_redraws < CONFIG.redraw.maxRedraws) {
-+              feature_space = create_subspace(D);
-+              subspace_redraws = subspace_redraws + 1;
-+          }
++  // Astra's centred affine model (2026-09-10, CONFIG.subspace.model = 'affine'): p(x, y) = B·n + K[(x − .5)·e_x + (y − .5)·e_y]
++  // with n, e_x, e_y an orthonormal frame in the three visible harmonics — the fixed frame n = (1,1,1)/√3, e_x = (1,0,−1)/√2,
++  // e_y = (1,−2,1)/√6, or a uniformly random orthonormal frame per session (frame: 'random'). Visible gain exactly K on both
++  // axes, axes orthogonal, and the contour radius stays ≥ .0548 everywhere the task can show for B = 1.25, K = 1.33
++  // (analytic certificate, any frame) — no fold, no rescale, no redraw. The k = 0 component is 0 (it never moves the contour).
++  function create_subspace_affine(D) {
++      if (D !== 4) throw new Error('the affine subspace model needs D = 4');
++      var cfg = (CONFIG.subspace && CONFIG.subspace.affine) || {};
++      var B = (cfg.B !== undefined) ? cfg.B : 1.25, K = (cfg.K !== undefined) ? cfg.K : 1.33;
++      var n, ex, ey;
++      if (cfg.frame === 'random') {
++          function gauss() { var u1 = Math.random() || 1e-12, u2 = Math.random(); return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2); }
++          function nrm(w) { var l = Math.sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]); return [w[0] / l, w[1] / l, w[2] / l]; }
++          function d3(p, q) { return p[0] * q[0] + p[1] * q[1] + p[2] * q[2]; }
++          var a = [gauss(), gauss(), gauss()], b = [gauss(), gauss(), gauss()], c = [gauss(), gauss(), gauss()];
++          n = nrm(a);                                                                   // Gram–Schmidt: a uniformly random orthonormal frame
++          var t = d3(b, n); ex = nrm([b[0] - t * n[0], b[1] - t * n[1], b[2] - t * n[2]]);
++          var t1 = d3(c, n), t2 = d3(c, ex); ey = nrm([c[0] - t1 * n[0] - t2 * ex[0], c[1] - t1 * n[1] - t2 * ex[1], c[2] - t1 * n[2] - t2 * ex[2]]);
 +      } else {
-+          for (let i = 1; i < feature_space.length; i++) {          // pavlovia build: rescale u / v when a component exceeds 1.5
-+              let vec = feature_space[i];
++          n = [1 / Math.sqrt(3), 1 / Math.sqrt(3), 1 / Math.sqrt(3)]; ex = [1 / Math.sqrt(2), 0, -1 / Math.sqrt(2)]; ey = [1 / Math.sqrt(6), -2 / Math.sqrt(6), 1 / Math.sqrt(6)];
++      }
++      var u = [0, K * ex[0], K * ex[1], K * ex[2]], v = [0, K * ey[0], K * ey[1], K * ey[2]], base = [0, B * n[0], B * n[1], B * n[2]];
++      var origin = base.map(function (x, i) { return x - 0.5 * (u[i] + v[i]); });      // so that p = origin + x·u + y·v as everywhere else
++      return [origin, u, v];
++  }
++  // (b) the Pavlovia generator: create_subspace, then u / v rescaled when a component exceeds 1.5 (CONFIG.redraw.rescale)
++  function draw_feature_space() {
++      if (CONFIG.subspace && CONFIG.subspace.model === 'affine') return create_subspace_affine(D);
++      var fs = create_subspace(D);
++      if (CONFIG.redraw.rescale !== false) {
++          for (let i = 1; i < fs.length; i++) {
++              let vec = fs[i];
 +              let maxVal = Math.max(...vec.map(Math.abs));
-+              if (maxVal > 1.5) { feature_space[i] = vec.map(v => v / maxVal); }
++              if (maxVal > 1.5) { fs[i] = vec.map(v => v / maxVal); }
 +          }
++      }
++      return fs;
++  }
++  // (c') the rotation screen (candidate design change, 2026-09-11; CONFIG.redraw.minRotatedGap > 0 switches it on, default 0 = off).
++  // Astra's finding on run 932457: when a harmonic coefficient changes sign between two category means, the two means differ
++  // in that harmonic only by a rotation (flipping the sign of harmonic k is a rotation by 180/k degrees), and the training
++  // phase rotates every exemplar at random — so A and B can be near-identical for the participant. The criterion is the
++  // contour gap between the category means after the best relative rotation (the metric of scripts/rotation_lottery.py:
++  // arc-length-resampled polygons, centroid removed, symmetric closest-point RMS, rotation searched on a 36-angle grid with a
++  // golden-section refinement); the plane is drawn again while the smaller of the A/B and B/C gaps is below minRotatedGap.
++  function contour_polygon(par) {                                                   // the 50-vertex polygon the experiment draws
++      var N = 50, pts = [];
++      for (var i = 0; i < N; i++) {
++          var dev = 0;
++          for (var k = 0; k < par.length; k++) dev = dev + 0.1 * par[k] * Math.sin(k * (i - 1) * (2 * Math.PI / N));
++          pts.push([(0.3 + dev) * Math.cos(i * 2 * Math.PI / N), (0.3 + dev) * Math.sin(i * 2 * Math.PI / N)]);
++      }
++      return pts;
++  }
++  function resample_centred(P, M) {                                                 // closed polygon -> M points equally spaced along the perimeter, centroid removed
++      var Q = P.concat([P[0]]), s = [0];
++      for (var i = 1; i < Q.length; i++) s.push(s[i - 1] + Math.hypot(Q[i][0] - Q[i - 1][0], Q[i][1] - Q[i - 1][1]));
++      var L = s[s.length - 1], out = [], j = 0, cx = 0, cy = 0;
++      for (var m = 0; m < M; m++) {
++          var t = L * m / M;
++          while (j < s.length - 2 && s[j + 1] < t) j++;
++          var f = (t - s[j]) / ((s[j + 1] - s[j]) || 1e-12);
++          var x = Q[j][0] + f * (Q[j + 1][0] - Q[j][0]), y = Q[j][1] + f * (Q[j + 1][1] - Q[j][1]);
++          out.push([x, y]); cx += x; cy += y;
++      }
++      cx /= M; cy /= M;
++      return out.map(function (q) { return [q[0] - cx, q[1] - cy]; });
++  }
++  function pt_seg_rms(P, Q) {                                                       // RMS over the points of P of the distance to the closed polyline Q
++      var tot = 0, n = Q.length;
++      for (var a = 0; a < P.length; a++) {
++          var best = Infinity, px = P[a][0], py = P[a][1];
++          for (var b = 0; b < n; b++) {
++              var ax = Q[b][0], ay = Q[b][1], bx = Q[(b + 1) % n][0], by = Q[(b + 1) % n][1];
++              var dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy + 1e-12;
++              var t = ((px - ax) * dx + (py - ay) * dy) / l2; t = t < 0 ? 0 : (t > 1 ? 1 : t);
++              var ex = px - (ax + t * dx), ey = py - (ay + t * dy), d2 = ex * ex + ey * ey;
++              if (d2 < best) best = d2;
++          }
++          tot += best;
++      }
++      return Math.sqrt(tot / P.length);
++  }
++  function rotate_pts(Q, phi) { var c = Math.cos(phi), s = Math.sin(phi); return Q.map(function (q) { return [q[0] * c - q[1] * s, q[0] * s + q[1] * c]; }); }
++  function rotated_gap(par1, par2) {                                                // contour gap after the best relative rotation
++      var P = resample_centred(contour_polygon(par1), 160), Q = resample_centred(contour_polygon(par2), 160);
++      var g = function (phi) { var R = rotate_pts(Q, phi); return 0.5 * (pt_seg_rms(P, R) + pt_seg_rms(R, P)); };
++      var NR = 36, vals = [], best = 0;
++      for (var i = 0; i < NR; i++) { vals.push(g(2 * Math.PI * i / NR)); if (vals[i] < vals[best]) best = i; }
++      var lo = 2 * Math.PI * best / NR - 2 * Math.PI / NR, hi = 2 * Math.PI * best / NR + 2 * Math.PI / NR;
++      for (var it = 0; it < 10; it++) {
++          var a = hi - 0.618 * (hi - lo), b = lo + 0.618 * (hi - lo);
++          if (g(a) < g(b)) hi = b; else lo = a;
++      }
++      return Math.min(vals[best], g(0.5 * (lo + hi)));
++  }
++  function category_gaps(subspace) {                                                // [A/B gap, B/C gap] between the category means (.25,.5), (.5,.5), (.75,.5)
++      var o = subspace[0], u = subspace[1], v = subspace[2];
++      var par = function (x, y) { return vector_plus(vector_plus(o, scalar_product(x, u)), scalar_product(y, v)); };
++      var A = par(0.25, 0.5), B = par(0.5, 0.5), C = par(0.75, 0.5);
++      return [rotated_gap(A, B), rotated_gap(B, C)];
++  }
++  var MIN_ROT_GAP = (CONFIG.redraw.minRotatedGap > 0) ? CONFIG.redraw.minRotatedGap : 0;
++  subspace_redraws_rotation = 0;
++  function plane_rejected(fs) {
++      if (CONFIG.redraw.enabled && min_contour_radius(fs, CHECK_COORDS) < CONFIG.redraw.minRadius) return 'fold';
++      if (MIN_ROT_GAP > 0) { var gg = category_gaps(fs); if (Math.min(gg[0], gg[1]) < MIN_ROT_GAP) return 'rotation'; }
++      return null;
++  }
++  // (c) the screens: draw again while the contour would fold anywhere the experiment can show (CONFIG.redraw.enabled), or, when
++  // the rotation screen is on, while the category means are near-rotations of each other
++  if (feature_space === null) {
++      feature_space = draw_feature_space();
++      var why = plane_rejected(feature_space);
++      while (why !== null && subspace_redraws < CONFIG.redraw.maxRedraws) {
++          feature_space = draw_feature_space();
++          subspace_redraws = subspace_redraws + 1;
++          if (why === 'rotation') subspace_redraws_rotation = subspace_redraws_rotation + 1;
++          why = plane_rejected(feature_space);
 +      }
 +  }
 +  subspace_min_radius = min_contour_radius(feature_space, CHECK_COORDS);
++  var _gaps = category_gaps(feature_space); subspace_rot_gap_ab = _gaps[0]; subspace_rot_gap_bc = _gaps[1];
 +  // visible gain of each direction: the k = 0 harmonic does not move the contour (sin(0) = 0), so only components 1..D-1 count
 +  subspace_gain_u = Math.sqrt(feature_space[1].slice(1).reduce(function (a, x) { return a + x * x; }, 0));
 +  subspace_gain_v = Math.sqrt(feature_space[2].slice(1).reduce(function (a, x) { return a + x * x; }, 0));
 +  discrimination_parameters = CONFIG.discriminationParameters.map(function (r) { return r.slice(); });
-+  console.log("feature_space:", JSON.stringify(feature_space), "source:", space_source, space_id, "redraws:", subspace_redraws, "min contour radius:", subspace_min_radius, "gain u/v:", subspace_gain_u, subspace_gain_v);
++  console.log("feature_space:", JSON.stringify(feature_space), "source:", space_source, space_id, "redraws:", subspace_redraws, "(rotation:", subspace_redraws_rotation, ") min contour radius:", subspace_min_radius, "gain u/v:", subspace_gain_u, subspace_gain_v, "rotated gaps A/B, B/C:", subspace_rot_gap_ab, subspace_rot_gap_bc, "min required:", MIN_ROT_GAP);
 +  window.__EXP.feature_space = feature_space; window.__EXP.subspace_redraws = subspace_redraws; window.__EXP.subspace_min_radius = subspace_min_radius; window.__EXP.space_id = space_id;
++  window.__EXP.subspace_rot_gap_ab = subspace_rot_gap_ab; window.__EXP.subspace_rot_gap_bc = subspace_rot_gap_bc; window.__EXP.subspace_redraws_rotation = subspace_redraws_rotation; window.__EXP.min_rotated_gap = MIN_ROT_GAP;
    // Run 'Begin Experiment' code from SetupCategorizationTask
    weight_vectorA = [1];
-@@ -683,4 +784,5 @@
+@@ -683,4 +908,5 @@
  
    Resp_s_or_d = new core.Keyboard({psychoJS: psychoJS, clock: new util.Clock(), waitForStart: true});
 +  window.__EXP.stims = { Shape1: Shape1, Shape2: Shape2 };   // for the headless render check (tests/run_headless.py)
  
    // Initialize components for Routine "WelcomeToCategorizationTask"
-@@ -741,5 +843,5 @@
+@@ -741,5 +967,5 @@
      win : psychoJS.window,
      name : 'Square', units : undefined,
 -    image : 'default.png', mask : undefined,
 +    image : 'green_square.png', mask : undefined,
      anchor : 'center',
      ori : 0.0,
-@@ -839,5 +941,34 @@
+@@ -839,5 +1065,35 @@
    routineTimer = new util.CountdownTimer();  // to track time remaining of each (non-slip) routine
  
 +  // self-hosted build: measure the anti-aliasing this browser/GPU actually delivers (one hidden frame, see measureAntialias)
@@ -273,6 +398,7 @@
 +  try {
 +    const win = psychoJS.window, r = win._renderer, gl = r ? r.gl : null;
 +    if (!gl) return { gray_levels: 'no-gl', intermediate_px: '', samples: '' };
++    const ori0 = Shape1.ori, pos0 = Shape1.pos;                       // v1.1.4: the probe must leave the stimulus exactly as it found it (v1.1.0–v1.1.3 left Shape1 at 20 deg for the whole session — Astra's audit, 2026-09-11)
 +    Shape1.setOri(20); Shape1.setPos([0, 0]); Shape1.setAutoDraw(true);
 +    win.render();
 +    const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
@@ -282,25 +408,25 @@
 +    gl.readPixels(cx - box / 2, cy - box / 2, box, box, gl.RGBA, gl.UNSIGNED_BYTE, buf);
 +    const levels = new Set(); let inter = 0;
 +    for (let i = 0; i < box * box; i++) { const v = buf[i * 4]; if (v > 12 && v < 243) inter++; levels.add(v >> 3); }
-+    Shape1.setAutoDraw(false); win.render();
++    Shape1.setAutoDraw(false); Shape1.setOri(ori0 || 0); Shape1.setPos(pos0 || [0, 0]); win.render();
 +    return { gray_levels: levels.size, intermediate_px: inter, samples: gl.getParameter(gl.SAMPLES), dpr: window.devicePixelRatio, buffer: [W, H] };
-+  } catch (e) { return { gray_levels: 'error', intermediate_px: '', samples: '', error: String(e) }; }
++  } catch (e) { try { Shape1.setAutoDraw(false); Shape1.setOri(0); } catch (e2) {} return { gray_levels: 'error', intermediate_px: '', samples: '', error: String(e) }; }
  }
  
-@@ -855,4 +986,5 @@
+@@ -855,4 +1111,5 @@
  
      //--- Prepare to start Routine 'Consent' ---
 +    window.__EXP.routine = 'Consent'; window.__EXP.routineStart = performance.now();
      t = 0;
      frameN = -1;
-@@ -924,5 +1056,5 @@
+@@ -924,5 +1181,5 @@
  
      // check for quit (typically the Esc key)
 -    if (psychoJS.experiment.experimentEnded || psychoJS.eventManager.getKeys({keyList:['escape']}).length > 0) {
 +    if (psychoJS.experiment.experimentEnded || escapeQuitRequested()) {
        return quitPsychoJS('The [Escape] key was pressed. Goodbye!', false);
      }
-@@ -959,8 +1091,4 @@
+@@ -959,8 +1216,4 @@
      }
      psychoJS.experiment.addData('Consent.stopped', globalClock.getTime());
 -    // update the trial handler
@@ -309,20 +435,20 @@
 -    }
      psychoJS.experiment.addData('key_resp.keys', key_resp.keys);
      if (typeof key_resp.keys !== 'undefined') {  // we had a response
-@@ -991,4 +1119,5 @@
+@@ -991,4 +1244,5 @@
  
      //--- Prepare to start Routine 'SetupExperiment' ---
 +    window.__EXP.routine = 'SetupExperiment'; window.__EXP.routineStart = performance.now();
      t = 0;
      frameN = -1;
-@@ -1019,5 +1148,5 @@
+@@ -1019,5 +1273,5 @@
      // update/draw components on each frame
      // check for quit (typically the Esc key)
 -    if (psychoJS.experiment.experimentEnded || psychoJS.eventManager.getKeys({keyList:['escape']}).length > 0) {
 +    if (psychoJS.experiment.experimentEnded || escapeQuitRequested()) {
        return quitPsychoJS('The [Escape] key was pressed. Goodbye!', false);
      }
-@@ -1131,15 +1260,74 @@
+@@ -1131,15 +1385,77 @@
  var PreTestConditions;
  var PreTest;
 +var PreTestStaircases;
@@ -354,6 +480,8 @@
 +  psychoJS.experiment.addData('adaptive_method', ADAPTIVE_METHOD);
 +  psychoJS.experiment.addData('subspace_redraws', subspace_redraws);
 +  psychoJS.experiment.addData('subspace_min_radius', subspace_min_radius);
++  psychoJS.experiment.addData('subspace_rot_gap_ab', subspace_rot_gap_ab); psychoJS.experiment.addData('subspace_rot_gap_bc', subspace_rot_gap_bc);   // category-mean contour gaps after the best rotation (rotation screen, 2026-09-11)
++  psychoJS.experiment.addData('subspace_redraws_rotation', subspace_redraws_rotation); psychoJS.experiment.addData('subspace_min_rotated_gap', (CONFIG.redraw.minRotatedGap > 0) ? CONFIG.redraw.minRotatedGap : 0);
 +  psychoJS.experiment.addData('subspace_center', JSON.stringify(feature_space[0]));
 +  psychoJS.experiment.addData('subspace_vector1', JSON.stringify(feature_space[1]));
 +  psychoJS.experiment.addData('subspace_vector2', JSON.stringify(feature_space[2]));
@@ -363,6 +491,7 @@
 +  psychoJS.experiment.addData('subspace_gain_v', subspace_gain_v);
 +  psychoJS.experiment.addData('space_id', (space_id === null) ? '' : space_id);
 +  psychoJS.experiment.addData('space_source', space_source);
++  psychoJS.experiment.addData('subspace_model', (CONFIG.subspace && CONFIG.subspace.model === 'affine') ? ('affine_' + ((CONFIG.subspace.affine && CONFIG.subspace.affine.frame) || 'fixed') + '_B' + ((CONFIG.subspace.affine && CONFIG.subspace.affine.B) || 1.25) + '_K' + ((CONFIG.subspace.affine && CONFIG.subspace.affine.K) || 1.33)) : 'legacy');
 +  psychoJS.experiment.addData('shape_size_height_units', 0.25);
 +  try { psychoJS.experiment.addData('window_size_px', JSON.stringify(psychoJS.window.size)); psychoJS.experiment.addData('device_pixel_ratio', window.devicePixelRatio); } catch (e) {}
 +}
@@ -405,7 +534,7 @@
 +      seed: undefined, name: 'PreTest'
      });
      psychoJS.experiment.addLoop(PreTest); // add the loop to the experiment
-@@ -1147,12 +1335,12 @@
+@@ -1147,12 +1463,12 @@
      // Schedule all the trials in the trialList:
      for (const thisQuestLoop of PreTest) {
 +      snapshot = PreTest.getSnapshot();
@@ -422,7 +551,7 @@
 +      PreTestLoopScheduler.add(PreTestLoopEndIteration(PreTestLoopScheduler, snapshot));
      }
  
-@@ -1166,5 +1354,7 @@
+@@ -1166,5 +1482,7 @@
    return async function() {
      // ------Prepare for next entry------
 -    level = PreTest.intensity;
@@ -431,7 +560,7 @@
 +    level = currentPlan.level;
  
      return Scheduler.Event.NEXT;
-@@ -1404,13 +1594,14 @@
+@@ -1404,13 +1722,14 @@
  function PostTestLoopBegin(PostTestLoopScheduler, snapshot) {
    return async function() {
 -    // setup a MultiStairTrialHandler
@@ -454,7 +583,7 @@
 +      seed: undefined, name: 'PostTest'
      });
      psychoJS.experiment.addLoop(PostTest); // add the loop to the experiment
-@@ -1418,12 +1609,12 @@
+@@ -1418,12 +1737,12 @@
      // Schedule all the trials in the trialList:
      for (const thisQuestLoop of PostTest) {
 +      snapshot = PostTest.getSnapshot();
@@ -471,7 +600,7 @@
 +      PostTestLoopScheduler.add(PostTestLoopEndIteration(PostTestLoopScheduler, snapshot));
      }
  
-@@ -1436,6 +1627,58 @@
+@@ -1436,6 +1755,58 @@
    return async function() {
      // ------Prepare for next entry------
 -    level = PostTest.intensity;
@@ -532,20 +661,20 @@
 +      currentLoop = psychoJS.experiment;
      return Scheduler.Event.NEXT;
    }
-@@ -1486,4 +1729,5 @@
+@@ -1486,4 +1857,5 @@
  
      //--- Prepare to start Routine 'DiscrimInstructions_Pre' ---
 +    window.__EXP.routine = 'DiscrimInstructions_Pre'; window.__EXP.routineStart = performance.now();
      t = 0;
      frameN = -1;
-@@ -1574,5 +1818,5 @@
+@@ -1574,5 +1946,5 @@
  
      // check for quit (typically the Esc key)
 -    if (psychoJS.experiment.experimentEnded || psychoJS.eventManager.getKeys({keyList:['escape']}).length > 0) {
 +    if (psychoJS.experiment.experimentEnded || escapeQuitRequested()) {
        return quitPsychoJS('The [Escape] key was pressed. Goodbye!', false);
      }
-@@ -1609,8 +1853,4 @@
+@@ -1609,8 +1981,4 @@
      }
      psychoJS.experiment.addData('DiscrimInstructions_Pre.stopped', globalClock.getTime());
 -    // update the trial handler
@@ -554,13 +683,13 @@
 -    }
      psychoJS.experiment.addData('KeyboardResponse.keys', KeyboardResponse.keys);
      if (typeof KeyboardResponse.keys !== 'undefined') {  // we had a response
-@@ -1656,4 +1896,5 @@
+@@ -1656,4 +2024,5 @@
  
      //--- Prepare to start Routine 'DiscriminationTrial' ---
 +    window.__EXP.routine = 'DiscriminationTrial'; window.__EXP.routineStart = performance.now();
      t = 0;
      frameN = -1;
-@@ -1664,31 +1905,10 @@
+@@ -1664,31 +2033,10 @@
      // update component parameters for each repeat
      // Run 'Begin Routine' code from SetupTrial
 -    // Debug staircase loading
@@ -598,21 +727,21 @@
 +    is_catch = currentPlan ? currentPlan.isCatch : false;
  
      function shape_from_coordinates(coordinates, subspace, shape_spacing) {
-@@ -1777,5 +1997,5 @@
+@@ -1777,5 +2125,5 @@
      coord2 = vector_minus(feature_center, scalar_product(level, feature_vector));
  
 -    if ((Math.random() < 0.5)) {
 +    if (!is_catch) {
          correct_answer = "d";
          shape1 = shape_from_coordinates(coord1, feature_space, 10);
-@@ -1783,4 +2003,6 @@
+@@ -1783,4 +2131,6 @@
      } else {
          correct_answer = "s";
 +        coord1 = feature_center.slice();      // identical pair: both shapes at the centre (logged truthfully; the old build logged centre +/- level here)
 +        coord2 = feature_center.slice();
          shape1 = shape_from_coordinates(feature_center, feature_space, 10);
          shape2 = shape_from_coordinates(feature_center, feature_space, 10);
-@@ -1794,5 +2016,12 @@
+@@ -1794,5 +2144,12 @@
      psychoJS.experiment.addData('coord2', JSON.stringify(coord2));
      psychoJS.experiment.addData('level_used', level);
 -    psychoJS.experiment.addData('staircase_label', (currentLoop.currentStaircase ? currentLoop.currentStaircase._name : ""));
@@ -626,24 +755,27 @@
 +    window.__EXP.trial = { phase: currentPhaseName, label: (currentPlan ? currentPlan.label : null), level: level, rawLevel: (currentPlan ? currentPlan.rawLevel : null), isCatch: is_catch, correct_answer: correct_answer, n: (currentPlan && currentPlan.staircase ? currentPlan.staircase.n : (currentPlan ? currentPlan.index : null)), reference: !!(currentPlan && currentPlan.staircase === null), routineStart: performance.now() };
      excursion = 0.25;
      position0x = (excursion * Math.random());
-@@ -1822,4 +2051,9 @@
+@@ -1822,4 +2179,12 @@
      Shape2.setPos([position2x, position2y]);
      Shape2.setVertices(shape2);
++    psychoJS.experiment.addData('shape1_ori_applied', Shape1.ori); psychoJS.experiment.addData('shape2_ori_applied', Shape2.ori);   // v1.1.4: the orientations actually drawn (both 0, as in the original builds)
 +    Object.assign(window.__EXP.trial, {   // debug overlay: everything this trial is made of
 +      feature_index: feature_index, feature_center: feature_center.slice(), feature_vector: feature_vector.slice(), coord1: coord1.slice(), coord2: coord2.slice(),
 +      params1: vector_plus(vector_plus(feature_space[0], scalar_product(coord1[0], feature_space[1])), scalar_product(coord1[1], feature_space[2])),
 +      params2: vector_plus(vector_plus(feature_space[0], scalar_product(coord2[0], feature_space[1])), scalar_product(coord2[1], feature_space[2])),
-+      position1: [position1x, position1y], position2: [position2x, position2y], orientation1: orientation1, orientation2: orientation2, vertices1: shape1, vertices2: shape2 });
++      position1: [position1x, position1y], position2: [position2x, position2y], orientation1: Shape1.ori, orientation2: Shape2.ori, orientation_sampled_unused: [orientation1, orientation2], vertices1: shape1, vertices2: shape2 });
++    // note (2026-09-11): orientation1/2 are sampled by the original code but never applied — the original lab and Pavlovia builds
++    // show both discrimination shapes at 0 deg (only position and vertices are set). Kept as is; orientation1/2 above are the applied values.
      Resp_s_or_d.keys = undefined;
      Resp_s_or_d.rt = undefined;
-@@ -1911,5 +2145,5 @@
+@@ -1911,5 +2276,5 @@
  
      // check for quit (typically the Esc key)
 -    if (psychoJS.experiment.experimentEnded || psychoJS.eventManager.getKeys({keyList:['escape']}).length > 0) {
 +    if (psychoJS.experiment.experimentEnded || escapeQuitRequested()) {
        return quitPsychoJS('The [Escape] key was pressed. Goodbye!', false);
      }
-@@ -1955,7 +2189,34 @@
+@@ -1955,7 +2320,34 @@
      }
      // store data for current loop
 -    // update the trial handler
@@ -681,7 +813,7 @@
 +      if (currentInterleaver.finished) { currentLoop.finished = true; }   // ends the TrialHandler loop after this row
      }
      psychoJS.experiment.addData('Resp_s_or_d.keys', Resp_s_or_d.keys);
-@@ -1968,34 +2229,5 @@
+@@ -1968,34 +2360,5 @@
  
      Resp_s_or_d.stop();
 -    if (typeof currentLoop !== 'undefined' && currentLoop !== null && currentLoop.name) {
@@ -717,20 +849,20 @@
 +    // (the MultiStairHandler CI block of the pavlovia build is replaced by the staircase summary logged above)
      // the Routine "DiscriminationTrial" was not non-slip safe, so reset the non-slip timer
      routineTimer.reset();
-@@ -2019,4 +2251,5 @@
+@@ -2019,4 +2382,5 @@
  
      //--- Prepare to start Routine 'WelcomeToCategorizationTask' ---
 +    window.__EXP.routine = 'WelcomeToCategorizationTask'; window.__EXP.routineStart = performance.now();
      t = 0;
      frameN = -1;
-@@ -2106,5 +2339,5 @@
+@@ -2106,5 +2470,5 @@
  
      // check for quit (typically the Esc key)
 -    if (psychoJS.experiment.experimentEnded || psychoJS.eventManager.getKeys({keyList:['escape']}).length > 0) {
 +    if (psychoJS.experiment.experimentEnded || escapeQuitRequested()) {
        return quitPsychoJS('The [Escape] key was pressed. Goodbye!', false);
      }
-@@ -2141,8 +2374,4 @@
+@@ -2141,8 +2505,4 @@
      }
      psychoJS.experiment.addData('WelcomeToCategorizationTask.stopped', globalClock.getTime());
 -    // update the trial handler
@@ -739,13 +871,13 @@
 -    }
      psychoJS.experiment.addData('PressAnyKey3.keys', PressAnyKey3.keys);
      if (typeof PressAnyKey3.keys !== 'undefined') {  // we had a response
-@@ -2179,4 +2408,5 @@
+@@ -2179,4 +2539,5 @@
  
      //--- Prepare to start Routine 'CategorizationTrial' ---
 +    window.__EXP.routine = 'CategorizationTrial'; window.__EXP.routineStart = performance.now();
      t = 0;
      frameN = -1;
-@@ -2217,4 +2447,9 @@
+@@ -2217,4 +2578,9 @@
      psychoJS.experiment.addData('subspace_vector1', JSON.stringify(subspace[1]));
      psychoJS.experiment.addData('subspace_vector2', JSON.stringify(subspace[2]));
 +    logSessionColumns();
@@ -755,14 +887,14 @@
 +      params: subspace[0].map(function (o, k) { return o + x_list[trial_number] * subspace[1][k] + y_list[trial_number] * subspace[2][k]; }) };
  
      Stimulus.setPos([xpos, ypos]);
-@@ -2281,5 +2516,5 @@
+@@ -2281,5 +2647,5 @@
  
      // check for quit (typically the Esc key)
 -    if (psychoJS.experiment.experimentEnded || psychoJS.eventManager.getKeys({keyList:['escape']}).length > 0) {
 +    if (psychoJS.experiment.experimentEnded || escapeQuitRequested()) {
        return quitPsychoJS('The [Escape] key was pressed. Goodbye!', false);
      }
-@@ -2316,8 +2551,4 @@
+@@ -2316,8 +2682,4 @@
      }
      psychoJS.experiment.addData('CategorizationTrial.stopped', globalClock.getTime());
 -    // update the trial handler
@@ -771,52 +903,52 @@
 -    }
      psychoJS.experiment.addData('Respond_1or2or3.keys', Respond_1or2or3.keys);
      if (typeof Respond_1or2or3.keys !== 'undefined') {  // we had a response
-@@ -2353,4 +2584,5 @@
+@@ -2353,4 +2715,5 @@
  
      //--- Prepare to start Routine 'Feedback' ---
 +    window.__EXP.routine = 'Feedback'; window.__EXP.routineStart = performance.now();
      t = 0;
      frameN = -1;
-@@ -2452,4 +2684,5 @@
+@@ -2452,4 +2815,5 @@
      // Set the point change text and color
      point_value = utilitymatrix[true_category][numeric_response_minus1];
 +    window.__EXP.lastResult = { phase: 'Categorization', trial_number: trial_number, true_category: true_category_list[trial_number], key: Respond_1or2or3.keys, rt: Respond_1or2or3.rt, response: numeric_response_minus1, correct: correctness, point_value: point_value, points: points, delay: delay_duration };   // debug overlay
      //PointChange.text = ((point_value > 0) ? "+" : "") + point_value.toString();
      if (point_value > 0) {
-@@ -2570,5 +2803,5 @@
+@@ -2570,5 +2934,5 @@
  
      // check for quit (typically the Esc key)
 -    if (psychoJS.experiment.experimentEnded || psychoJS.eventManager.getKeys({keyList:['escape']}).length > 0) {
 +    if (psychoJS.experiment.experimentEnded || escapeQuitRequested()) {
        return quitPsychoJS('The [Escape] key was pressed. Goodbye!', false);
      }
-@@ -2662,4 +2895,5 @@
+@@ -2662,4 +3026,5 @@
  
      //--- Prepare to start Routine 'DelayedStimulus' ---
 +    window.__EXP.routine = 'DelayedStimulus'; window.__EXP.routineStart = performance.now();
      t = 0;
      frameN = -1;
-@@ -2711,5 +2945,5 @@
+@@ -2711,5 +3076,5 @@
  
      // check for quit (typically the Esc key)
 -    if (psychoJS.experiment.experimentEnded || psychoJS.eventManager.getKeys({keyList:['escape']}).length > 0) {
 +    if (psychoJS.experiment.experimentEnded || escapeQuitRequested()) {
        return quitPsychoJS('The [Escape] key was pressed. Goodbye!', false);
      }
-@@ -2776,4 +3010,5 @@
+@@ -2776,4 +3141,5 @@
  
      //--- Prepare to start Routine 'DiscriminationInstructions_Post' ---
 +    window.__EXP.routine = 'DiscriminationInstructions_Post'; window.__EXP.routineStart = performance.now();
      t = 0;
      frameN = -1;
-@@ -2859,5 +3094,5 @@
+@@ -2859,5 +3225,5 @@
  
      // check for quit (typically the Esc key)
 -    if (psychoJS.experiment.experimentEnded || psychoJS.eventManager.getKeys({keyList:['escape']}).length > 0) {
 +    if (psychoJS.experiment.experimentEnded || escapeQuitRequested()) {
        return quitPsychoJS('The [Escape] key was pressed. Goodbye!', false);
      }
-@@ -2894,8 +3129,4 @@
+@@ -2894,8 +3260,4 @@
      }
      psychoJS.experiment.addData('DiscriminationInstructions_Post.stopped', globalClock.getTime());
 -    // update the trial handler
@@ -825,21 +957,21 @@
 -    }
      psychoJS.experiment.addData('key_resp_2.keys', key_resp_2.keys);
      if (typeof key_resp_2.keys !== 'undefined') {  // we had a response
-@@ -2926,4 +3157,6 @@
+@@ -2926,4 +3288,6 @@
  
      //--- Prepare to start Routine 'Thanks' ---
 +    window.__EXP.routine = 'Thanks'; window.__EXP.routineStart = performance.now();
 +    if (CONFIG.sona && CONFIG.sona.showCompletionCode) text_3.setText('Thank you for participating in the experiment!\n\nYour completion code: ' + completionCode());
      t = 0;
      frameN = -1;
-@@ -2970,5 +3203,5 @@
+@@ -2970,5 +3334,5 @@
  
      // check for quit (typically the Esc key)
 -    if (psychoJS.experiment.experimentEnded || psychoJS.eventManager.getKeys({keyList:['escape']}).length > 0) {
 +    if (psychoJS.experiment.experimentEnded || escapeQuitRequested()) {
        return quitPsychoJS('The [Escape] key was pressed. Goodbye!', false);
      }
-@@ -3019,4 +3252,26 @@
+@@ -3019,4 +3383,26 @@
  
  
 +/**
@@ -866,7 +998,7 @@
 +
  function importConditions(currentLoop) {
    return async function () {
-@@ -3028,4 +3283,5 @@
+@@ -3028,4 +3414,5 @@
  
  async function quitPsychoJS(message, isCompleted) {
 +  if (isCompleted && CONFIG.sona && CONFIG.sona.showCompletionCode) message = message + completionCodeHtml();   // the closing dialog stays until OK: the code is readable and copyable

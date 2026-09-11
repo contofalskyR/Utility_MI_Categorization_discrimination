@@ -32,3 +32,11 @@ touched by the reference trials; `space_id = 7`, `space_source = pool`, and `sub
 Nine category × response cells, points and measured delay (DelayedStimulus routine): +1 → 0 s (74 / 73 trials), +3 → 0 s (69),
 −1 → 1.29–1.32 s mean, range 1.15–1.44 s (13 / 12 / 13 / 18 trials; programmed 1.333 s, the spread is the ~.27 s frame period
 of headless SwiftShader), −3 → 7.95–7.96 s, range 7.73–8.02 s (10 / 18 trials; programmed 8 s). Unchanged from the Pavlovia build.
+
+## v1.1.5 rotation screen (2026-09-11)
+
+`rotscreen.html?autostart=1&method=quest&smoke=1` (config.js + `config_rotscreen.js`, minRotatedGap .010): two sessions RESULT OK,
+0 page errors; `subspace_rot_gap_ab/bc` .011304/.013628 and .015607/.015075 logged and re-computed in Python (`scripts/rotation_lottery.py`)
+to 6 decimals; both applied orientations 0. Loop check with minRotatedGap forced to .02: 30 redraws (21 for rotation, 9 for folds),
+final gaps .0304/.0216, session completed. The in-experiment metric agrees with Python on the two reference planes (ROB_ASTRA
+.006081/.014354; 932457 .009294/.022067).

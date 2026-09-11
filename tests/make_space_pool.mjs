@@ -1,14 +1,14 @@
 /**
  * make_space_pool.mjs — generate a saved pool of screened feature spaces (checklist item 4/5).
  *
- *   node tests/make_space_pool.mjs [count=40] [seed=2026] [minRadius=0.05] > spaces_pool.json
+ *   node tests/make_space_pool.mjs [count=40] [seed=2026] [minRadius=0.005] > spaces_pool.json
  *
  * Reproduces the experiment's own generator (create_subspace with the two-component norm(), D = 4) with a seeded RNG,
  * applies the same screen as the experiment's redraw rule (minimum contour radius over the six corners of the reachable
  * support >= minRadius) and writes {id, origin, u, v, min_radius, gain_u, gain_v, draws_to_accept, seed}. Also reports
  * the acceptance rate on stderr. Set CONFIG.spaces.usePool = true and ship the file next to index.html.
  */
-const count = parseInt(process.argv[2] || '40', 10), seed = parseInt(process.argv[3] || '2026', 10), minRadius = parseFloat(process.argv[4] || '0.05');
+const count = parseInt(process.argv[2] || '40', 10), seed = parseInt(process.argv[3] || '2026', 10), minRadius = parseFloat(process.argv[4] || '0.005');
 const CHECK = [[-0.2, 0.05], [-0.2, 0.95], [1.2, 0.05], [1.2, 0.95], [-0.325, 0.5], [1.325, 0.5]];
 const D = 4, FULL_D_NORM = false;
 
@@ -47,7 +47,11 @@ const gain = vec => Math.sqrt(vec.slice(1).reduce((a, x) => a + x * x, 0));
 const spaces = []; let draws = 0;
 while (spaces.length < count) {
   let n = 0, sp, r;
-  do { sp = create_subspace(D); r = min_contour_radius(sp, CHECK); n++; draws++; } while (!(isFinite(r) && r >= minRadius));
+  do {
+    sp = create_subspace(D);
+    for (let i = 1; i < sp.length; i++) { const m = Math.max(...sp[i].map(Math.abs)); if (m > 1.5) sp[i] = sp[i].map(x => x / m); }   // the Pavlovia rescale, as in the experiment (CONFIG.redraw.rescale)
+    r = min_contour_radius(sp, CHECK); n++; draws++;
+  } while (!(isFinite(r) && r >= minRadius));
   spaces.push({ id: spaces.length + 1, origin: sp[0], u: sp[1], v: sp[2], min_radius: r, gain_u: gain(sp[1]), gain_v: gain(sp[2]), draws_to_accept: n });
 }
 process.stderr.write(`${count} spaces from ${draws} draws (acceptance ${(100 * count / draws).toFixed(1)}%), seed ${seed}, minRadius ${minRadius}, norm ${FULL_D_NORM ? 'full-D' : '2-component'}\n`);

@@ -12,19 +12,19 @@
  *   ?__noOutput=1                     PsychoJS convention: do not save anything
  */
 window.EXP_CONFIG = {
-  buildVersion: 'selfhost_v1.1.2_2026-09-09',
+  buildVersion: 'selfhost_v1.1.5_2026-09-11',   // v1.1.5 = v1.1.4 + the rotation screen (minRotatedGap .010) + its four logging columns
   expName: 'Asymmetric_Utility_discrimination_2025',
   condition: 'asymmetric',                      // label only (launcher page, README); the symmetric study loads config_symmetric.js on top
 
   // ---------------------------------------------------------------- adaptive procedure
   method: 'quest',                              // default when the URL has no ?method=
   methods: {
-    // QUEST as the online build runs it (the collected 2026-09-02 cohort): jsQUEST default 501-point grid (range null),
-    // grain .01, first trial at the prior quantile (.1631), stop when the 5-95% posterior width < .15, cap 50.
-    // Lab parity instead: grain: 0.1, range: 0.65, firstLevel: 'startVal' (9-point grid, first trial .1). Jacob decides.
+    // QUEST as the online build runs it: jsQUEST default 501-point grid (range null), first trial at the prior quantile
+    // (.1631), stop when the 5-95% posterior width < .15, cap 50. Grain: 0.1 = the symmetric online build and the lab
+    // (v1.1.3, Robert's choice); the collected asymmetric cohort of 2026-09-02 ran 0.01 (v1.1.2 and earlier).
     quest: {
       maxTrials: 50, minTrials: 0, stopInterval: 0.15, firstLevel: 'quantile', catchPolicy: 'forced50',
-      quest: { tGuess: 0.1, tGuessSd: 0.3, pThreshold: 0.82, beta: 3.5, delta: 0.01, gamma: 0.5, grain: 0.01, range: null },
+      quest: { tGuess: 0.1, tGuessSd: 0.3, pThreshold: 0.82, beta: 3.5, delta: 0.01, gamma: 0.5, grain: 0.1, range: null },
     },
     // Psi (Kontsevich & Tyler 1999) on the same feed as QUEST (correctness of every trial, identical pairs included):
     // joint posterior on (alpha, beta, lambda) of the pooled curve .5 + (.5 - lambda) * Weibull; entropy-minimising placement.
@@ -64,18 +64,36 @@ window.EXP_CONFIG = {
 
   // ---------------------------------------------------------------- stimulus geometry
   redraw: {
-    enabled: true,                               // reject feature subspaces whose contour folds anywhere the experiment can show
-    minRadius: 0.05,                             // 0.3 + deviation must stay above this (contour radius, shape units)
+    enabled: true,                               // fold screen: draw the feature subspace again while its contour would fold anywhere the experiment can show
+    rescale: true,                               // the Pavlovia generator as it was: u / v divided by their largest component when it exceeds 1.5 (before the screen)
+    minRadius: 0.005,                            // the contour radius (0.3 + deviation) at the 50 rendered angles must stay above this = no fold, plus a small tolerance
+                                                 // (v1.1.2 used 0.05, which also rejected ~40% of the fold-free subspaces and made the shapes rounder on average)
     // corners of everything the experiment can show: training support (+/- 6 sigma) and discrimination pairs up to level .7 at either centre
     checkCoords: [[-0.2, 0.05], [-0.2, 0.95], [1.2, 0.05], [1.2, 0.95], [-0.325, 0.5], [1.325, 0.5]],
     maxRedraws: 10000,
-    // enabled: false restores the pavlovia behaviour exactly (no screening, u/v rescaled when a component exceeds 1.5)
+    // Rotation screen (v1.1.5, 2026-09-11 — Astra's finding on run 932457; Robert's decision, to be confirmed with Jacob): the
+    // training phase rotates every exemplar at random, so two category means that are near-rotations of each other (a harmonic
+    // coefficient changing sign between them) are indistinguishable for the participant. minRotatedGap > 0 draws the plane
+    // again while the smaller of the A/B and B/C category-mean contour gaps after the best relative rotation is below it
+    // (same metric as scripts/rotation_lottery.py). 0 = off (v1.1.4 behaviour). Reference: old online cohort A/B gap 10/50/90 %
+    // .0067/.0138/.0202; of fold-free planes .008 rejects ~26 %, .010 ~35 %, .012 ~49 %. Logged on every row:
+    // subspace_rot_gap_ab / _bc, subspace_redraws_rotation, subspace_min_rotated_gap.
+    minRotatedGap: 0.010,
+    // enabled: false restores the Pavlovia behaviour exactly (no screen, folded shapes included); logged per session:
+    // subspace_redraws, subspace_min_radius, subspace_gain_u / v, subspace_vector1 / 2
   },
   // Saved, screened pool of feature spaces instead of a fresh draw per session (checklist item 4/5). Generate the pool with
   // `node tests/make_space_pool.mjs 40 > spaces_pool.json` (every space passes the redraw screen above). Assignment:
   // 'url' = ?space=<id> only (fall back to a fresh screened draw when absent), 'participant' = hash of the participant id
   // (same participant -> same space; good for reliability repeats), 'random' = random pool member. space_id is logged.
   spaces: { usePool: false, poolFile: 'spaces_pool.json', assignment: 'participant' },
+  // Stimulus model (design decision for Jacob, 2026-09-10; default = the experiment as it has always run):
+  //   'legacy' = Jacob's random plane through the 4-cube (create_subspace + rescale + fold screen above)
+  //   'affine' = Astra's centred affine plane in the three visible harmonics: gain exactly K on both axes, axes orthogonal,
+  //              contour radius ≥ .0548 everywhere the task can show (B = 1.25, K = 1.33) — no folds by construction.
+  //              frame: 'fixed' = the same plane for every participant; 'random' = a random orthonormal frame per session
+  //              (keeps "every participant gets a different plane"). Logged as subspace_model on every row.
+  subspace: { model: 'legacy', affine: { B: 1.25, K: 1.33, frame: 'random' } },
   normFullD: false,                              // false = the original 2-component norm() (current design); true = full-D norm (raise with Jacob)
   antialias: true,                               // WebGL multisampling for the shape edges (requires the patched lib/ shipped here)
   // What the Escape key does. 'confirm' (default): a first press is logged and ignored, a second press within 3 s quits, so a

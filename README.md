@@ -174,19 +174,30 @@ curve; the offline pipeline fits whichever curve it fits from the logged trials 
 ## What changed relative to the Pavlovia script
 
 `build/build_experiment.py` derives the experiment from `build/Asymmetric_Utility_discrimination_2025_pavlovia.js` (the
-project deployed 2026-08-23, i.e. the 2026-08-20 fixes: clamp, per-row logging, fixed-length training) with 20
+project deployed 2026-08-23, i.e. the 2026-08-20 fixes: clamp, per-row logging, fixed-length training) with 39
 anchored patches; `build/experiment.diff` is the complete diff. In words:
 
 1. `MultiStairHandler` / jsQUEST are replaced by a plain `TrialHandler` per phase driven by `adaptive.js`; the loop ends
    when both staircases are finished. `quest_conditions.xlsx` is no longer read; parameters come from `config.js`.
 2. Resources are all local (`jsQUEST.min.js` and Pavlovia's `default.png` removed; the feedback square starts on
    `green_square.png`, it is replaced on every feedback anyway).
-3. Feature subspace: the redraw rule — the subspace is redrawn until the contour radius `0.3 + deviation` stays above
-   `.05` at the six corners of everything the experiment can show (training support ± 6 σ, discrimination pairs up to
-   level .70 at either centre); `subspace_redraws` and `subspace_min_radius` are logged on every trial row. This
-   replaces the `maxVal > 1.5` rescaling of u/v, which did not prevent folded shapes. `CONFIG.redraw.enabled = false`
-   restores the old behaviour. The two-component `norm()` is kept as the design; `CONFIG.normFullD = true` switches to
+3. Feature subspace: the fold screen — the subspace is drawn exactly as on Pavlovia (`create_subspace`, then u/v
+   rescaled when a component exceeds 1.5) and drawn again while the contour radius `0.3 + deviation` at the 50 rendered
+   angles falls to `.005` or below at any of the six corners of everything the experiment can show (training support
+   ± 6 σ, discrimination pairs up to level .70 at either centre). Accepted subspaces are untouched: every shape shown is
+   one the old build could have shown, only the folded ones are excluded (about a third of draws). `subspace_redraws`
+   and `subspace_min_radius` are logged on every trial row; `CONFIG.redraw.enabled = false` restores the old behaviour
+   exactly. (v1.1.2 screened at `.05` without the rescale, which also rejected many fold-free subspaces.) The two-component `norm()` is kept as the design; `CONFIG.normFullD = true` switches to
    the full-D norm (Jacob's call, not made here).
+   **v1.1.5 adds the rotation screen** (Astra's finding on run 932457, 2026-09-11): the training phase rotates every
+   exemplar at random, so two category means that are near-rotations of each other — a harmonic coefficient changing
+   sign between them — cannot be told apart by the participant. The plane is therefore also drawn again while the
+   smaller of the A/B and B/C category-mean contour gaps *after the best relative rotation* (arc-length-resampled
+   polygons, centroid removed, symmetric closest-point RMS; the metric of `scripts/rotation_lottery.py`) is below
+   `CONFIG.redraw.minRotatedGap` = .010. Old online cohort A/B gap 10/50/90 % .0067/.0138/.0202; of fold-free planes .008
+   rejects ~26 %, .010 ~35 %, .012 ~49 %. Each check costs ~0.1 s. Logged on every row: `subspace_rot_gap_ab`,
+   `subspace_rot_gap_bc`, `subspace_redraws_rotation`, `subspace_min_rotated_gap`; `minRotatedGap: 0` restores v1.1.4.
+   Decision taken by Robert on 2026-09-11, to be confirmed with Jacob; the minimum is the one number to revisit.
 4. Identical pairs are logged truthfully: `coord1` / `coord2` are the centre on catch trials (the old build wrote centre
    ± level there), and `is_catch`, `said_different` are explicit columns.
 5. Data: `datasaver.js` replaces the Pavlovia upload (see Robustness above); redirects for SONA; the method and build in
@@ -231,7 +242,9 @@ Everything the Pavlovia CSV had is still there under the same names (`level_used
   nTrials (= minTrials), catchPolicy, firstLevel, method`
 - `subspace_redraws`, `subspace_min_radius`, `subspace_gain_u` / `subspace_gain_v` (norm of the visible components
   k ≥ 1), `space_id` / `space_source` (`pool` or `drawn`), `window_size_px`, `device_pixel_ratio`,
-  `shape_size_height_units`, and `subspace_center/vector1/vector2` on discrimination rows too
+  `shape_size_height_units`, and `subspace_center/vector1/vector2` on discrimination rows too; v1.1.5:
+  `subspace_rot_gap_ab` / `subspace_rot_gap_bc` (category-mean contour gaps after the best rotation),
+  `subspace_redraws_rotation`, `subspace_min_rotated_gap`; v1.1.4: `shape1_ori_applied` / `shape2_ori_applied`, `subspace_model`
 - reference block rows (when enabled): `PreRef.*` / `PostRef.*` (`response`, `trial_n`, `block_index`, `block_length`),
   `updates_staircase = 0` (1 on adaptive rows), `level_used` 0 for identical pairs
 
