@@ -15,8 +15,10 @@ ap.add_argument('--partial', action='store_true'); ap.add_argument('--credits', 
 a = ap.parse_args()
 base = a.worker.rstrip('/'); q = '?admin=' + urllib.parse.quote(a.admin)
 
+UA = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36'}
 def get(path):
-    with urllib.request.urlopen(base + path, timeout=60) as r: return r.read()
+    req = urllib.request.Request(base + path, headers=UA)
+    with urllib.request.urlopen(req, timeout=60) as r: return r.read()
 
 listing = json.loads(get('/files' + q))
 if not listing.get('ok'): sys.exit('listing failed: ' + json.dumps(listing))
