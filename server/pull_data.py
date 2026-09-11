@@ -13,7 +13,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('--worker', required=True); ap.add_argument('--admin', required=True); ap.add_argument('--out', default='./data')
 ap.add_argument('--partial', action='store_true'); ap.add_argument('--credits', action='store_true')
 a = ap.parse_args()
-base = a.worker.rstrip('/'); q = '?admin=' + urllib.parse.quote(a.admin)
+base = a.worker.rstrip('/'); q = '?admin=' + urllib.parse.quote(a.admin, safe='')
 
 UA = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36'}
 def get(path):
