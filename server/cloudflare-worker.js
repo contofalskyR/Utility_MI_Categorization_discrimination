@@ -84,7 +84,7 @@ export default {
       const key = (payload.partial ? 'partial/' : '') + name;
       const meta = {};
       for (const k of ['participant', 'session', 'expName', 'method', 'buildVersion', 'surveyCode', 'completed', 'partial', 'sent']) meta[k] = String(payload[k] ?? '');
-      meta.received = new Date().toISOString(); meta.ip = request.headers.get('CF-Connecting-IP') || '';
+      meta.received = new Date().toISOString();
       await S.put(key, content, meta, kind === 'csv' ? 'text/csv' : 'text/plain');
       let credit = null;
       if (payload.completed && kind === 'csv') {
