@@ -103,8 +103,8 @@ window.EXP_CONFIG = {
 
   // ---------------------------------------------------------------- data
   data: {
-    endpoint: '',                                // e.g. 'https://your-worker.workers.dev/collect' or '/collect' when served by server/collect.py; '' = download only
-    token: '',                                   // must match the endpoint's token (COLLECT_TOKEN)
+    endpoint: 'https://discrimination-collect.robert-contofalsky.workers.dev/collect',                                // e.g. 'https://your-worker.workers.dev/collect' or '/collect' when served by server/collect.py; '' = download only
+    token: 'Rs7mABxtLoO8YQS/duWhs999624Jr+aRtxMiFA5pYJ4=',                                   // must match the endpoint's token (COLLECT_TOKEN)
     autosaveMinutes: 3,                          // partial uploads while the session runs (0 = off)
     saveOnUnload: true,                          // beacon the partial data if the tab is closed early
     fallbackDownload: true,                      // offer the CSV as a download if the upload fails (or no endpoint)
