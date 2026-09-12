@@ -117,7 +117,7 @@ window.EXP_CONFIG = {
   // the client-side completion URL below after the closing dialog; (3) the participant sees a completion code (below)
   // and survey_code is in every row, the file name and the upload index, so credit can be granted by hand in SONA.
   redirect: {
-    completionUrl: '',                           // e.g. 'https://rutgers.sona-systems.com/webstudy_credit.aspx?experiment_id=NNN&credit_token=TOKEN&survey_code={survey_code}'
+    completionUrl: 'https://rutgers-researchpool.sona-systems.com/webstudy_credit.aspx?experiment_id=1241&credit_token=321faaa19dc1453bb70cec3acb7332fc&survey_code={survey_code}',
     cancellationUrl: '',
   },
   sona: {
