@@ -6,10 +6,10 @@
  */
 Object.assign(window.EXP_CONFIG, {
   buildVersion: 'selfhost_v1.1.5_2026-09-11_sym',
-  expName: 'discrimination2024c',                 // the name both symmetric cohorts (lab Nov-Dec 2025, online Aug 2026) were collected under
+  expName: 'discrimination2024c',
   condition: 'symmetric',
-  // BC probes at the midpoint between B (.5) and C (.75) instead of the utility-shifted .616 of the asymmetric study
   discriminationParameters: [[0.375, 0.5, 1, 0], [0.625, 0.5, 1, 0]],
+  redirect: { completionUrl: 'https://rutgers-researchpool.sona-systems.com/webstudy_credit.aspx?experiment_id=1242&credit_token=1622bceedfd34bbea154330ea4f84d8c&survey_code={survey_code}', cancellationUrl: '' },
 });
 // Symmetric payoff: a correct C is worth 1 like every other correct response (asymmetric study: 3). Verified against the
 // logged respCifC of both symmetric cohorts (lab Nov-Dec 2025 and Robert's 2026-08-23 online session); the B/C
