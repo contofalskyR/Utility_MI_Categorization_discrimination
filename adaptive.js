@@ -253,6 +253,7 @@ export class Staircase {
     if (method === 'quest') this.engine = new Quest(quest);
     else if (method === 'psi') this.engine = new Psi(grid);
     else if (method === 'questplus') this.engine = new QuestPlus(grid);
+    else if (method === 'psi_marginal') this.engine = new QuestPlus({ interest: ['alpha', 'beta'], ...grid });
     else throw new Error('unknown method ' + method);
     this.yesNo = (method === 'questplus' || method === 'psi_marginal');   // identical pairs enter at level 0 as a same/different answer
     this.n = 0; this.nCatch = 0; this.finished = false; this.finishedReason = null; this.trials = []; this.pending = null;
