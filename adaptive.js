@@ -254,6 +254,7 @@ export class Staircase {
     else if (method === 'psi') this.engine = new Psi(grid);
     else if (method === 'questplus') this.engine = new QuestPlus(grid);
     else throw new Error('unknown method ' + method);
+    this.yesNo = (method === 'questplus' || method === 'psi_marginal');   // identical pairs enter at level 0 as a same/different answer
     this.n = 0; this.nCatch = 0; this.finished = false; this.finishedReason = null; this.trials = []; this.pending = null;
   }
   /** the engine's raw proposal for the next trial (before clamping) */
@@ -265,7 +266,7 @@ export class Staircase {
   nextTrial() {
     let isCatch;
     if (this.catchPolicy === 'none') isCatch = false;
-    else if (this.catchPolicy === 'adaptive' && this.method === 'questplus') {
+    else if (this.catchPolicy === 'adaptive' && this.yesNo) {
       const need = this.n > 0 && this.nCatch / this.n < this.catchMin;   // keep enough identical pairs for the FA estimate
       isCatch = need || this.engine.wantsCatch();
       if (this.n === 0) isCatch = this.rng() < 0.5;
@@ -278,7 +279,7 @@ export class Staircase {
   /** record the response. saidDifferent: boolean; level / isCatch as returned by nextTrial */
   addResponse({ level, isCatch, saidDifferent, rt = null }) {
     const correct = isCatch ? !saidDifferent : saidDifferent;
-    if (this.method === 'questplus') this.engine.update(isCatch ? 0 : level, saidDifferent);
+    if (this.yesNo) this.engine.update(isCatch ? 0 : level, saidDifferent);   // QUEST+ / psi_marginal: identical pair = level 0, outcome = said "different"
     else this.engine.update(level, correct);                       // Quest and Psi: correctness at the nominal (clamped) level, identical pairs included
     this.n++; if (isCatch) this.nCatch++;
     const s = this.engine.summary();
