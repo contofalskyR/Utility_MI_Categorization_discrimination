@@ -12,7 +12,7 @@
  *   ?__noOutput=1                     PsychoJS convention: do not save anything
  */
 window.EXP_CONFIG = {
-  buildVersion: 'selfhost_v1.1.5_2026-09-11',   // v1.1.5 = v1.1.4 + the rotation screen (minRotatedGap .010) + its four logging columns
+  buildVersion: 'selfhost_v1.1.5_2026-09-11_psim',   // v1.1.5 + the psi_marginal method (2026-09-18); QUEST pages unchanged
   expName: 'Asymmetric_Utility_discrimination_2025',
   condition: 'asymmetric',                      // label only (launcher page, README); the symmetric study loads config_symmetric.js on top
 
@@ -38,6 +38,12 @@ window.EXP_CONFIG = {
     questplus: {
       maxTrials: 50, minTrials: 0, stopAlphaSd: null, catchPolicy: 'forced50', catchMin: 0.3,
       grid: {},                                  // {alpha, beta, fa, lambda (fixed number), levels}
+    },
+    // Psi-marginal (Prins 2013) on the yes/no model: identical pairs are level 0, the false-alarm rate is a nuisance
+    // parameter, placement minimises the entropy of (alpha, beta). Entry pages psi_marginal.html / psi_marginal_sym.html.
+    psi_marginal: {
+      maxTrials: 50, minTrials: 0, stopAlphaSd: null, catchPolicy: 'forced50', catchMin: 0.3,
+      grid: {},                                  // {alpha, beta, fa, lambda (fixed number), levels, interest}
     },
   },
   interleave: 'random',                          // 'random' = PsychoJS MultiStairHandler passes (AB|BA|..), 'fullRandom', 'sequential'
