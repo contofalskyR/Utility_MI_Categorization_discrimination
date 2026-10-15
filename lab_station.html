@@ -12,10 +12,14 @@
       (CSV uploaded) or was abandoned (window closed before the end). Nothing in the experiment changes; the session
       runs exactly the build that is live online.
 
-      Rule: the first completed session of a pair is a coin flip, the second is the other condition. A session that
-      is abandoned does not use up its slot: its condition goes back in the queue. Dry runs (smoke) are not counted.
+      Rule (2026-10-15, second version): strict alternation over COMPLETED sessions — the next condition is the
+      opposite of the last completed counted session (the very first one is a coin flip, or whatever you set by hand).
+      An abandoned session does not advance the alternation. Dry runs (smoke) are not counted.
 
-      Every session's CSV carries platform=lab, lab_assigned, lab_rule=station-pairs, lab_n (counted session number),
+      The participant id is <tag>_<id> (default tag IN-PERSON; an id you type, or T + date-time when you type none), so the
+      file name reads IN-PERSON_279728_Asymmetric_...csv. The experiment builds its file name from the participant id, and
+      that is the only part of the name the station can set without touching the experiment.
+      Every session's CSV carries platform=lab, lab_assigned, lab_rule=station-alternate, lab_n (counted session number),
       lab_session (an id that matches the station log). "Download log" gives the station's own CSV.
 
       State lives in this browser profile's localStorage (key lab_station_v1). Plain ES5, no libraries: works in
@@ -55,7 +59,9 @@
       </div>
 
       <div class="card">
-        <label>Participant id (optional) <input type="text" id="pid" placeholder="e.g. LAB012" autocomplete="off"></label>
+        <label>File-name tag <input type="text" id="tag" value="IN-PERSON" style="width:110px" autocomplete="off"></label>
+        &nbsp; <label>Participant id <input type="text" id="pid" placeholder="e.g. 279728" autocomplete="off"></label>
+        <span class="muted">→ the id becomes <code id="pidPreview">IN-PERSON_…</code> (file name and <code>participant</code> column)</span>
         &nbsp; <label><input type="checkbox" id="smoke"> four-minute dry run (not counted)</label>
         <span id="smokeCond" style="display:none"> &nbsp; condition for the dry run: <select id="smokeSel"><option value="random">random</option><option value="asym">asymmetric</option><option value="sym">symmetric</option></select></span>
         <div style="margin-top:10px"><button class="big" id="start">Start next participant</button> <span id="msg" class="muted"></span></div>
@@ -72,7 +78,7 @@
           <button class="warn" id="reset">Reset the tally</button> <span id="resetNote" class="muted"></span>
         </div>
         <div class="muted" style="margin-top:10px">
-          Rule: randomized pairs of <b>completed</b> sessions — a coin flip for the first of each pair, the other condition for the second; an abandoned session gives its condition back to the queue; dry runs are not counted.
+          Rule: strict alternation over <b>completed</b> sessions — the next condition is the opposite of the last completed counted session (the very first is a coin flip unless you set it); an abandoned session does not advance the alternation; dry runs are not counted.
           Completed = the session's CSV was saved (uploaded to the collector, or downloaded here if the upload failed — the row says which).
           If this page was reloaded while a session was running, that session shows as "untracked": mark it completed or abandoned by hand.
           The tally is stored in this browser profile only (<code>localStorage</code>); the log download is the backup, and every CSV also carries <code>lab_assigned</code>, <code>lab_n</code>, <code>lab_session</code>.
@@ -112,29 +118,31 @@
         function untracked() { var out = []; for (var i = 0; i < state.sessions.length; i++) if (state.sessions[i].status === 'untracked') out.push(state.sessions[i]); return out; }
 
         // ---------- assignment
+        function lastCompleted() { var c = counted(); for (var i = c.length - 1; i >= 0; i--) if (c[i].status === 'completed') return c[i]; return null; }
+        function nextCond() {                                               // strict alternation over completed sessions; a manual 'set next' wins once
+          if (state.queue === 'asym' || state.queue === 'sym') return { cond: state.queue, role: 'set by hand' };
+          var l = lastCompleted(); return l ? { cond: OTHER[l.cond], role: 'alternate' } : { cond: coin(), role: 'coin flip (first)' };
+        }
         function assign(smoke) {
           if (smoke) { var pick = $('smokeSel').value; return { cond: pick === 'random' ? coin() : pick, role: 'smoke' }; }
-          if (state.queue === 'asym' || state.queue === 'sym') { var c = state.queue; state.queue = null; return { cond: c, role: 'second' }; }
-          var c2 = coin(); state.queue = OTHER[c2]; return { cond: c2, role: 'first' };
+          var n = nextCond(); if (n.role === 'set by hand') state.queue = null; return n;
         }
-        function giveBack(s) {                                              // an abandoned session returns its slot
-          if (s.role === 'first' && state.queue === OTHER[s.cond]) state.queue = null;
-          else if (s.role === 'second' && state.queue === null) state.queue = s.cond;
-        }
+        function giveBack(s) { /* alternation follows the last COMPLETED session, so an abandoned one is simply skipped */ }
         function start() {
           if (running()) { $('msg').textContent = 'a session is already running — close its window (or mark it) first'; return; }
-          var smoke = $('smoke').checked, pid = $('pid').value.replace(/\s+/g, '');
+          var smoke = $('smoke').checked, rawId = $('pid').value.replace(/\s+/g, ''), tag = $('tag').value.replace(/[^A-Za-z0-9-]/g, '');
+          var pid = (tag ? tag + '_' : '') + (rawId || ('T' + new Date().toISOString().replace(/[-:T]/g, '').slice(2, 12)));   // no id typed: tag + yymmddHHMM
           var a = assign(smoke);
           var s = { id: 'L' + Date.now().toString(36), lab_n: smoke ? 0 : counted().length + 1, started: nowIso(), finished: null, cond: a.cond, role: a.role,
                     participant: pid, status: 'running', upload: '', filename: '', smoke: smoke };
           var p = new URLSearchParams();
-          if (pid) p.set('participant', pid);
+          p.set('participant', pid);                                      // pre-filled, so the dialog does not ask for it
           if (smoke) p.set('smoke', '1');
-          p.set('platform', 'lab'); p.set('lab_assigned', s.cond); p.set('lab_rule', smoke ? 'smoke' : 'station-pairs'); p.set('lab_n', String(s.lab_n)); p.set('lab_session', s.id);
+          p.set('platform', 'lab'); p.set('lab_assigned', s.cond); p.set('lab_rule', smoke ? 'smoke' : 'station-alternate'); p.set('lab_n', String(s.lab_n)); p.set('lab_session', s.id);
           var url = PAGES[s.cond] + '?' + p.toString();
           var w = null;
           try { w = window.open(url, 'lab_session_' + s.id, 'popup=yes,width=1280,height=800'); } catch (e) { w = null; }
-          if (!w) { if (a.role === 'first') state.queue = null; else if (a.role === 'second') state.queue = s.cond; save(); $('msg').textContent = 'the browser blocked the new window — allow pop-ups for this site and click again'; render(); return; }
+          if (!w) { if (a.role === 'set by hand') state.queue = s.cond; save(); $('msg').textContent = 'the browser blocked the new window — allow pop-ups for this site and click again'; render(); return; }
           state.sessions.push(s); save();
           live = { win: w, session: s, completedSeen: false, progress: 'starting' };
           $('pid').value = ''; $('msg').textContent = '';
@@ -182,14 +190,15 @@
         function render() {
           var c = completedCounts(), run = running(), ut = untracked();
           $('tally').innerHTML = 'completed: &nbsp;asymmetric <b>' + c.asym + '</b> &nbsp;·&nbsp; symmetric <b>' + c.sym + '</b> <small>(' + counted().length + ' started, ' + (state.sessions.length - counted().length) + ' dry runs)</small>';
-          $('next').textContent = run ? 'a session is running' : ('next assigned session: ' + (state.queue ? NAME[state.queue] + ' (second of the current pair)' : 'coin flip (first of a new pair)'));
+          var nx = run ? null : nextCond();
+          $('next').textContent = run ? 'a session is running' : ('next assigned session: ' + (nx.role === 'coin flip (first)' ? 'coin flip (no completed session yet)' : NAME[nx.cond] + (nx.role === 'set by hand' ? ' (set by hand)' : ' (alternating after the last completed ' + NAME[OTHER[nx.cond]] + ')')));
           $('start').disabled = !!run;
           $('smokeCond').style.display = $('smoke').checked ? '' : 'none';
           var cur = $('current');
           if (run || live.session) {
             var s = run || live.session;
             cur.style.display = '';
-            cur.innerHTML = '<b class="run">Running:</b> ' + NAME[s.cond] + (s.role === 'smoke' ? ' (dry run)' : '') + ' · participant ' + (esc(s.participant) || '(asked in the dialog)') + ' · started ' + short(s.started) +
+            cur.innerHTML = '<b class="run">Running:</b> ' + NAME[s.cond] + (s.role === 'smoke' ? ' (dry run)' : '') + ' · participant ' + esc(s.participant) + ' · started ' + short(s.started) +
               '<div class="muted">' + esc(live.progress) + '</div>' +
               (s.status === 'completed' ? '<div class="ok">Completed — ' + esc(s.upload) + (s.filename ? ' · ' + esc(s.filename) : '') + '</div><button id="closeWin">Close the session window</button>' : '<button class="warn" id="abandon">Mark abandoned and close its window</button>');
             if ($('closeWin')) $('closeWin').onclick = function () { try { live.win.close(); } catch (e) {} };
@@ -202,7 +211,7 @@
             $('utDone').onclick = function () { finalize(u, 'completed'); render(); };
             $('utAb').onclick = function () { finalize(u, 'abandoned'); render(); };
           } else cur.style.display = 'none';
-          var rows = '<tr><th>#</th><th>started</th><th>condition</th><th>participant</th><th>pair</th><th>status</th><th>data</th><th>file</th></tr>';
+          var rows = '<tr><th>#</th><th>started</th><th>condition</th><th>participant</th><th>how assigned</th><th>status</th><th>data</th><th>file</th></tr>';
           for (var i = state.sessions.length - 1; i >= 0; i--) {
             var h = state.sessions[i], cls = h.status === 'completed' ? 'ok' : (h.status === 'abandoned' ? 'bad' : 'run');
             rows += '<tr><td>' + (h.lab_n || '–') + '</td><td>' + short(h.started) + '</td><td>' + NAME[h.cond] + '</td><td>' + esc(h.participant) + '</td><td>' + (h.role === 'smoke' ? 'dry run' : h.role) +
@@ -212,6 +221,10 @@
         }
 
         // ---------- controls
+        function preview() { var t = $('tag').value.replace(/[^A-Za-z0-9-]/g, ''), r = $('pid').value.replace(/\s+/g, ''); $('pidPreview').textContent = (t ? t + '_' : '') + (r || 'T<date-time>'); }
+        $('tag').oninput = preview; $('pid').oninput = preview; preview();
+        try { var savedTag = localStorage.getItem(KEY + ':tag'); if (savedTag !== null) { $('tag').value = savedTag; preview(); } } catch (e) {}
+        $('tag').onchange = function () { try { localStorage.setItem(KEY + ':tag', $('tag').value); } catch (e) {} };
         $('start').onclick = start;
         $('smoke').onchange = render;
         $('nAsym').onclick = function () { if (running()) return; state.queue = 'asym'; save(); render(); };
@@ -224,7 +237,7 @@
           localStorage.removeItem(KEY); state = { queue: null, sessions: [] }; armed = false; $('resetNote').textContent = ''; render();
         };
         $('dl').onclick = function () {
-          var cols = ['lab_session', 'lab_n', 'started', 'finished', 'condition', 'pair_role', 'participant', 'status', 'data', 'filename', 'dry_run'];
+          var cols = ['lab_session', 'lab_n', 'started', 'finished', 'condition', 'how_assigned', 'participant', 'status', 'data', 'filename', 'dry_run'];
           var lines = [cols.join(',')];
           for (var i = 0; i < state.sessions.length; i++) {
             var h = state.sessions[i], vals = [h.id, h.lab_n, h.started, h.finished || '', h.cond, h.role, h.participant, h.status, h.upload, h.filename, h.smoke ? 1 : 0];
