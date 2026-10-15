@@ -1,0 +1,125 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lab session — Asymmetric_Utility_discrimination_2025 [psi_marginal]</title>
+    <!--
+      psi_marginal_lab.html — the lab entry page (added 2026-10-15). It runs NOTHING itself: when opened it decides
+      asymmetric vs symmetric and sends the browser to the live page for that condition (psi_marginal.html or
+      psi_marginal_sym.html, in this same folder), so a lab session runs exactly the build that is live online.
+
+      The split is a clean 50/50: randomized pairs (permuted blocks of two). The first session of a pair is a coin
+      flip, the second is the other condition. After every even number of sessions the tally is exactly equal; the
+      order inside a pair is random so you cannot predict the next one. The tally lives in this browser's
+      localStorage on this computer (same Chrome profile, not incognito).
+
+      Switches (add to the URL):
+        ?status=1          show the tally and the history instead of starting a session; reset / set-next controls
+        ?cond=asym|sym     run that condition now (does not touch the tally — use it to re-run an aborted session)
+        ?participant=ID    pre-fill the participant id (the dialog then skips that field), e.g. ?participant=LAB012
+        ?smoke=1           four-minute dry run (passed through, like every other parameter)
+
+      Every parameter is passed through to the experiment page, plus platform=lab, lab_assigned=<cond>,
+      lab_rule=pairs|override, lab_n=<k>. PsychoJS copies URL parameters into expInfo (util.addInfoFromUrl), so the
+      CSV of a lab session carries those four columns; the file name and expName / build_version mark the condition
+      as before (Asymmetric_Utility_discrimination_2025 vs discrimination2024c, build_version ..._sym).
+    -->
+    <style>
+      body { font: 15px/1.45 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; margin: 0; background: #111; color: #ddd; }
+      #root { max-width: 760px; margin: 48px auto; padding: 0 20px; }
+      h1 { font-size: 20px; margin: 0 0 12px; }
+      .big { font-size: 28px; margin: 8px 0 16px; }
+      table { border-collapse: collapse; margin: 12px 0; }
+      td, th { border: 1px solid #444; padding: 4px 10px; text-align: left; font-size: 14px; }
+      th { background: #222; }
+      button, a.btn { font: inherit; padding: 6px 12px; margin: 4px 6px 4px 0; background: #2b5797; color: #fff; border: 0; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; }
+      button.warn { background: #8a2d2d; }
+      .muted { color: #999; font-size: 13px; }
+      code { background: #222; padding: 1px 5px; border-radius: 3px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      (function () {
+        var KEY = 'lab_assignment_v1';                                  // localStorage key: the tally for this computer / Chrome profile
+        var PAGES = { asym: 'psi_marginal.html', sym: 'psi_marginal_sym.html' };
+        var OTHER = { asym: 'sym', sym: 'asym' };
+        var q = new URLSearchParams(location.search);
+        var root = document.getElementById('root');
+
+        function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+        function coin() {                                               // unbiased bit: crypto when available, Math.random otherwise
+          try { var b = new Uint8Array(1); crypto.getRandomValues(b); return (b[0] & 1) ? 'asym' : 'sym'; } catch (e) { return Math.random() < 0.5 ? 'asym' : 'sym'; }
+        }
+        function storageOk() { try { localStorage.setItem(KEY + ':probe', '1'); localStorage.removeItem(KEY + ':probe'); return true; } catch (e) { return false; } }
+        function load() { try { var s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s && Array.isArray(s.history)) return s; } catch (e) {} return { next: null, history: [] }; }
+        function save(s) { localStorage.setItem(KEY, JSON.stringify(s)); }
+        function counted(s) { return s.history.filter(function (h) { return h.rule === 'pairs'; }); }
+        function tally(s) { var c = counted(s), a = c.filter(function (h) { return h.cond === 'asym'; }).length; return { n: c.length, asym: a, sym: c.length - a }; }
+        function go(cond, rule, n) {
+          var p = new URLSearchParams(location.search);
+          p.delete('cond'); p.delete('status');
+          p.set('platform', 'lab'); p.set('lab_assigned', cond); p.set('lab_rule', rule); p.set('lab_n', String(n));
+          location.replace(PAGES[cond] + '?' + p.toString());
+        }
+
+        // ---------- ?cond=asym|sym : run that condition, leave the tally alone (re-running an aborted session, or a check)
+        var override = (q.get('cond') || '').toLowerCase();
+        if (override && !PAGES[override]) { root.innerHTML = '<h1>Unknown condition "' + esc(override) + '"</h1><p>Use <code>?cond=asym</code> or <code>?cond=sym</code>.</p>'; return; }
+
+        var ok = storageOk();
+        if (!ok && !override) {
+          root.innerHTML = '<h1>Cannot keep the 50/50 tally here</h1><p>This browser window has no storage (incognito / private window, or storage blocked), ' +
+            'so a session started from here would not be counted. Open this page in a normal Chrome window on the lab computer, or start one condition by hand: ' +
+            '<a class="btn" href="?cond=asym">asymmetric</a> <a class="btn" href="?cond=sym">symmetric</a></p>';
+          return;
+        }
+        var state = ok ? load() : { next: null, history: [] };
+
+        if (override) {
+          if (ok) { state.history.push({ t: new Date().toISOString(), cond: override, rule: 'override', participant: q.get('participant') || '' }); save(state); }
+          go(override, 'override', 0); return;
+        }
+
+        // ---------- ?status=1 : the tally, the history, and the two controls
+        if (q.get('status') === '1') {
+          var t = tally(state);
+          var rows = state.history.slice().reverse().map(function (h, i) {
+            return '<tr><td>' + (state.history.length - i) + '</td><td>' + esc(h.t.replace('T', ' ').slice(0, 19)) + '</td><td>' + esc(h.cond) + '</td><td>' + esc(h.rule) + '</td><td>' + esc(h.participant || '') + '</td></tr>';
+          }).join('');
+          root.innerHTML =
+            '<h1>Lab sessions started from this computer</h1>' +
+            '<div class="big">asymmetric ' + t.asym + ' &nbsp;·&nbsp; symmetric ' + t.sym + ' &nbsp;<span class="muted">(' + t.n + ' counted' + (state.history.length - t.n ? ', ' + (state.history.length - t.n) + ' by hand' : '') + ')</span></div>' +
+            '<p>Next session: <b>' + (state.next ? esc(state.next) + ' (second of the current pair)' : 'coin flip (first of a new pair)') + '</b></p>' +
+            '<p><a class="btn" href="psi_marginal_lab.html">Start a session (assigned)</a> <a class="btn" href="?cond=asym">Run asymmetric by hand</a> <a class="btn" href="?cond=sym">Run symmetric by hand</a></p>' +
+            '<p>Set the next assigned condition: <button id="nAsym">asymmetric</button><button id="nSym">symmetric</button><button id="nClear">coin flip</button> ' +
+            '<span class="muted">(forces the next assigned session; it is counted, and the pairing restarts after it)</span></p>' +
+            '<p><button class="warn" id="reset">Reset the tally</button> <span id="resetNote" class="muted"></span></p>' +
+            '<table><tr><th>#</th><th>opened</th><th>condition</th><th>rule</th><th>participant</th></tr>' + (rows || '<tr><td colspan="5" class="muted">no sessions yet</td></tr>') + '</table>' +
+            '<p class="muted">Rule: randomized pairs — a coin flip for the first session of each pair, the other condition for the second. "by hand" = started with ?cond=, not counted: ' +
+            'use it to re-run a session that was abandoned after it had been counted, so the tally stays equal to the sessions that actually ran. ' +
+            'The tally is stored in this Chrome profile only (<code>localStorage</code>, key <code>' + KEY + '</code>). Every session\'s CSV also carries platform=lab, lab_assigned, lab_rule, lab_n.</p>';
+          document.getElementById('nAsym').onclick = function () { state.next = 'asym'; save(state); location.reload(); };
+          document.getElementById('nSym').onclick = function () { state.next = 'sym'; save(state); location.reload(); };
+          document.getElementById('nClear').onclick = function () { state.next = null; save(state); location.reload(); };
+          var armed = false;
+          document.getElementById('reset').onclick = function () {
+            if (!armed) { armed = true; document.getElementById('resetNote').textContent = 'click again to erase the tally and the history on this computer'; return; }
+            localStorage.removeItem(KEY); location.reload();
+          };
+          return;
+        }
+
+        // ---------- normal open: assign by randomized pairs, record, and go
+        var cond, rule = 'pairs';
+        if (state.next === 'asym' || state.next === 'sym') { cond = state.next; state.next = null; }      // second of the pair
+        else { cond = coin(); state.next = OTHER[cond]; }                                                 // first of the pair: coin flip, the other one is queued
+        state.history.push({ t: new Date().toISOString(), cond: cond, rule: rule, participant: q.get('participant') || '' });
+        save(state);
+        go(cond, rule, tally(state).n);
+      })();
+    </script>
+  </body>
+</html>
