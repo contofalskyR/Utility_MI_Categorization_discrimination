@@ -1,0 +1,240 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lab station — Asymmetric_Utility_discrimination_2025 [psi_marginal]</title>
+    <!--
+      lab_station.html — the lab experimenter's page (added 2026-10-15). Keep it open all day in its own window on
+      the lab computer. One click per participant: the station assigns the condition (clean 50/50, randomized pairs
+      of COMPLETED sessions), opens the live experiment page for it (psi_marginal.html or psi_marginal_sym.html, this
+      same folder, untouched) in a separate window, watches that window, and records whether the session completed
+      (CSV uploaded) or was abandoned (window closed before the end). Nothing in the experiment changes; the session
+      runs exactly the build that is live online.
+
+      Rule: the first completed session of a pair is a coin flip, the second is the other condition. A session that
+      is abandoned does not use up its slot: its condition goes back in the queue. Dry runs (smoke) are not counted.
+
+      Every session's CSV carries platform=lab, lab_assigned, lab_rule=station-pairs, lab_n (counted session number),
+      lab_session (an id that matches the station log). "Download log" gives the station's own CSV.
+
+      State lives in this browser profile's localStorage (key lab_station_v1). Plain ES5, no libraries: works in
+      Chrome, Firefox, Safari. Use Chrome for the experiment window, as online.
+    -->
+    <style>
+      body { font: 15px/1.45 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; margin: 0; background: #f4f4f4; color: #222; }
+      #root { max-width: 900px; margin: 24px auto; padding: 0 20px 40px; }
+      h1 { font-size: 20px; margin: 0 0 6px; }
+      h2 { font-size: 16px; margin: 22px 0 8px; }
+      .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 14px 18px; margin: 12px 0; }
+      .tally { font-size: 26px; margin: 4px 0; }
+      .tally small { font-size: 14px; color: #666; }
+      .muted { color: #666; font-size: 13px; }
+      .ok { color: #1b7f3b; } .bad { color: #a62828; } .run { color: #2b5797; }
+      button, a.btn { font: inherit; padding: 7px 14px; margin: 4px 8px 4px 0; background: #2b5797; color: #fff; border: 0; border-radius: 5px; cursor: pointer; text-decoration: none; display: inline-block; }
+      button.big { font-size: 18px; padding: 12px 22px; }
+      button.grey { background: #777; } button.warn { background: #8a2d2d; }
+      button:disabled { background: #bbb; cursor: default; }
+      input[type=text] { font: inherit; padding: 6px 8px; border: 1px solid #bbb; border-radius: 4px; width: 160px; }
+      select { font: inherit; padding: 5px; }
+      table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+      td, th { border: 1px solid #ddd; padding: 4px 8px; text-align: left; font-size: 13px; vertical-align: top; }
+      th { background: #eee; }
+      code { background: #eee; padding: 1px 5px; border-radius: 3px; }
+      #msg { min-height: 1.4em; }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <h1>Lab station — Asymmetric_Utility_discrimination_2025 (psi_marginal)</h1>
+      <div class="muted">Keep this window open. One click per participant; the condition is assigned at that click. Keep this window behind the participant's.</div>
+
+      <div class="card">
+        <div class="tally" id="tally"></div>
+        <div id="next" class="muted"></div>
+      </div>
+
+      <div class="card">
+        <label>Participant id (optional) <input type="text" id="pid" placeholder="e.g. LAB012" autocomplete="off"></label>
+        &nbsp; <label><input type="checkbox" id="smoke"> four-minute dry run (not counted)</label>
+        <span id="smokeCond" style="display:none"> &nbsp; condition for the dry run: <select id="smokeSel"><option value="random">random</option><option value="asym">asymmetric</option><option value="sym">symmetric</option></select></span>
+        <div style="margin-top:10px"><button class="big" id="start">Start next participant</button> <span id="msg" class="muted"></span></div>
+      </div>
+
+      <div class="card" id="current" style="display:none"></div>
+
+      <h2>Sessions started from this computer</h2>
+      <div class="card">
+        <table id="hist"></table>
+        <div style="margin-top:8px">
+          <button class="grey" id="dl">Download log (CSV)</button>
+          <span class="muted">Set the next assigned condition:</span> <button class="grey" id="nAsym">asymmetric</button><button class="grey" id="nSym">symmetric</button><button class="grey" id="nClear">coin flip</button>
+          <button class="warn" id="reset">Reset the tally</button> <span id="resetNote" class="muted"></span>
+        </div>
+        <div class="muted" style="margin-top:10px">
+          Rule: randomized pairs of <b>completed</b> sessions — a coin flip for the first of each pair, the other condition for the second; an abandoned session gives its condition back to the queue; dry runs are not counted.
+          Completed = the session's CSV was saved (uploaded to the collector, or downloaded here if the upload failed — the row says which).
+          If this page was reloaded while a session was running, that session shows as "untracked": mark it completed or abandoned by hand.
+          The tally is stored in this browser profile only (<code>localStorage</code>); the log download is the backup, and every CSV also carries <code>lab_assigned</code>, <code>lab_n</code>, <code>lab_session</code>.
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        var KEY = 'lab_station_v1';
+        var PAGES = { asym: 'psi_marginal.html', sym: 'psi_marginal_sym.html' };
+        var NAME = { asym: 'asymmetric', sym: 'symmetric' };
+        var OTHER = { asym: 'sym', sym: 'asym' };
+        var $ = function (id) { return document.getElementById(id); };
+        function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+        function coin() { try { var b = new Uint8Array(1); crypto.getRandomValues(b); return (b[0] & 1) ? 'asym' : 'sym'; } catch (e) { return Math.random() < 0.5 ? 'asym' : 'sym'; } }
+        function nowIso() { return new Date().toISOString(); }
+        function short(t) { return t ? String(t).replace('T', ' ').slice(0, 19) : ''; }
+        function storageOk() { try { localStorage.setItem(KEY + ':probe', '1'); localStorage.removeItem(KEY + ':probe'); return true; } catch (e) { return false; } }
+        function load() { try { var s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s && s.sessions) return s; } catch (e) {} return { queue: null, sessions: [] }; }
+        function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { $('msg').textContent = 'could not save the tally (storage full or blocked)'; } }
+
+        if (!storageOk()) {
+          $('root').innerHTML = '<h1>Cannot keep the tally here</h1><p>This browser window has no storage (incognito / private window, or storage blocked). Open the station in a normal Chrome window on the lab computer.</p>';
+          return;
+        }
+        var state = load();
+        var live = { win: null, session: null, completedSeen: false, progress: '' };
+
+        // sessions left "running" by a reload cannot be watched any more
+        for (var i = 0; i < state.sessions.length; i++) if (state.sessions[i].status === 'running') state.sessions[i].status = 'untracked';
+        save();
+
+        function counted() { var out = []; for (var i = 0; i < state.sessions.length; i++) if (state.sessions[i].role !== 'smoke') out.push(state.sessions[i]); return out; }
+        function completedCounts() { var c = { asym: 0, sym: 0 }, s = counted(); for (var i = 0; i < s.length; i++) if (s[i].status === 'completed') c[s[i].cond]++; return c; }
+        function running() { for (var i = state.sessions.length - 1; i >= 0; i--) if (state.sessions[i].status === 'running') return state.sessions[i]; return null; }
+        function untracked() { var out = []; for (var i = 0; i < state.sessions.length; i++) if (state.sessions[i].status === 'untracked') out.push(state.sessions[i]); return out; }
+
+        // ---------- assignment
+        function assign(smoke) {
+          if (smoke) { var pick = $('smokeSel').value; return { cond: pick === 'random' ? coin() : pick, role: 'smoke' }; }
+          if (state.queue === 'asym' || state.queue === 'sym') { var c = state.queue; state.queue = null; return { cond: c, role: 'second' }; }
+          var c2 = coin(); state.queue = OTHER[c2]; return { cond: c2, role: 'first' };
+        }
+        function giveBack(s) {                                              // an abandoned session returns its slot
+          if (s.role === 'first' && state.queue === OTHER[s.cond]) state.queue = null;
+          else if (s.role === 'second' && state.queue === null) state.queue = s.cond;
+        }
+        function start() {
+          if (running()) { $('msg').textContent = 'a session is already running — close its window (or mark it) first'; return; }
+          var smoke = $('smoke').checked, pid = $('pid').value.replace(/\s+/g, '');
+          var a = assign(smoke);
+          var s = { id: 'L' + Date.now().toString(36), lab_n: smoke ? 0 : counted().length + 1, started: nowIso(), finished: null, cond: a.cond, role: a.role,
+                    participant: pid, status: 'running', upload: '', filename: '', smoke: smoke };
+          var p = new URLSearchParams();
+          if (pid) p.set('participant', pid);
+          if (smoke) p.set('smoke', '1');
+          p.set('platform', 'lab'); p.set('lab_assigned', s.cond); p.set('lab_rule', smoke ? 'smoke' : 'station-pairs'); p.set('lab_n', String(s.lab_n)); p.set('lab_session', s.id);
+          var url = PAGES[s.cond] + '?' + p.toString();
+          var w = null;
+          try { w = window.open(url, 'lab_session_' + s.id, 'popup=yes,width=1280,height=800'); } catch (e) { w = null; }
+          if (!w) { if (a.role === 'first') state.queue = null; else if (a.role === 'second') state.queue = s.cond; save(); $('msg').textContent = 'the browser blocked the new window — allow pop-ups for this site and click again'; render(); return; }
+          state.sessions.push(s); save();
+          live = { win: w, session: s, completedSeen: false, progress: 'starting' };
+          $('pid').value = ''; $('msg').textContent = '';
+          render();
+        }
+
+        // ---------- watching the session window (same site, so its state is readable)
+        function finalize(s, status) {
+          s.status = status; s.finished = nowIso();
+          if (status === 'abandoned') giveBack(s);
+          save();
+        }
+        function watch() {
+          var s = live.session, w = live.win;
+          if (!s || !w) return;
+          var closed = true;
+          try { closed = !!w.closed; } catch (e) { closed = true; }
+          if (!closed) {
+            try {
+              var D = w.__DATASAVER, E = w.__EXP;
+              if (E && E.routine) {
+                var tr = (E.routine === 'DiscriminationTrial' || E.routine === 'CategorizationTrial' || E.routine === 'Feedback') ? (E.trial || {}) : {};
+                live.progress = E.routine + (tr.phase ? ' — ' + tr.phase : '') + (typeof tr.n === 'number' ? ' trial ' + (tr.n + 1) : (typeof tr.trial_number === 'number' ? ' trial ' + (tr.trial_number + 1) : ''));
+              }
+              if (D && D.completed && !live.completedSeen) {
+                live.completedSeen = true;
+                var rec = null;
+                for (var i = (D.uploads || []).length - 1; i >= 0; i--) if (D.uploads[i].kind === 'csv' && D.uploads[i].completed) { rec = D.uploads[i]; break; }
+                s.filename = rec ? rec.filename : '';
+                s.upload = rec ? (rec.ok ? 'uploaded' : (rec.download ? 'upload failed — CSV downloaded on this computer' : 'upload failed')) : 'saved (no record)';
+                finalize(s, 'completed');
+              }
+            } catch (e) { /* the window moved to another site or is not ready yet */ }
+          } else {
+            if (s.status === 'running') finalize(s, live.completedSeen ? 'completed' : 'abandoned');
+            else if (!s.finished) { s.finished = nowIso(); save(); }
+            live.win = null; live.session = null;
+          }
+          render();
+        }
+        setInterval(watch, 1000);
+        window.onbeforeunload = function () { if (running()) return 'A session is running. If you leave this page the station loses track of it.'; };
+
+        // ---------- rendering
+        function render() {
+          var c = completedCounts(), run = running(), ut = untracked();
+          $('tally').innerHTML = 'completed: &nbsp;asymmetric <b>' + c.asym + '</b> &nbsp;·&nbsp; symmetric <b>' + c.sym + '</b> <small>(' + counted().length + ' started, ' + (state.sessions.length - counted().length) + ' dry runs)</small>';
+          $('next').textContent = run ? 'a session is running' : ('next assigned session: ' + (state.queue ? NAME[state.queue] + ' (second of the current pair)' : 'coin flip (first of a new pair)'));
+          $('start').disabled = !!run;
+          $('smokeCond').style.display = $('smoke').checked ? '' : 'none';
+          var cur = $('current');
+          if (run || live.session) {
+            var s = run || live.session;
+            cur.style.display = '';
+            cur.innerHTML = '<b class="run">Running:</b> ' + NAME[s.cond] + (s.role === 'smoke' ? ' (dry run)' : '') + ' · participant ' + (esc(s.participant) || '(asked in the dialog)') + ' · started ' + short(s.started) +
+              '<div class="muted">' + esc(live.progress) + '</div>' +
+              (s.status === 'completed' ? '<div class="ok">Completed — ' + esc(s.upload) + (s.filename ? ' · ' + esc(s.filename) : '') + '</div><button id="closeWin">Close the session window</button>' : '<button class="warn" id="abandon">Mark abandoned and close its window</button>');
+            if ($('closeWin')) $('closeWin').onclick = function () { try { live.win.close(); } catch (e) {} };
+            if ($('abandon')) $('abandon').onclick = function () { finalize(s, 'abandoned'); try { live.win.close(); } catch (e) {} live.win = null; live.session = null; render(); };
+          } else if (ut.length) {
+            cur.style.display = '';
+            var u = ut[ut.length - 1];
+            cur.innerHTML = '<b class="bad">Untracked:</b> this page was reloaded while the ' + NAME[u.cond] + ' session of participant ' + (esc(u.participant) || '?') + ' (started ' + short(u.started) + ') was running. Did it finish? ' +
+              '<button id="utDone">completed</button><button class="warn" id="utAb">abandoned</button>';
+            $('utDone').onclick = function () { finalize(u, 'completed'); render(); };
+            $('utAb').onclick = function () { finalize(u, 'abandoned'); render(); };
+          } else cur.style.display = 'none';
+          var rows = '<tr><th>#</th><th>started</th><th>condition</th><th>participant</th><th>pair</th><th>status</th><th>data</th><th>file</th></tr>';
+          for (var i = state.sessions.length - 1; i >= 0; i--) {
+            var h = state.sessions[i], cls = h.status === 'completed' ? 'ok' : (h.status === 'abandoned' ? 'bad' : 'run');
+            rows += '<tr><td>' + (h.lab_n || '–') + '</td><td>' + short(h.started) + '</td><td>' + NAME[h.cond] + '</td><td>' + esc(h.participant) + '</td><td>' + (h.role === 'smoke' ? 'dry run' : h.role) +
+              '</td><td class="' + cls + '">' + esc(h.status) + '</td><td>' + esc(h.upload) + '</td><td class="muted">' + esc(h.filename) + '</td></tr>';
+          }
+          $('hist').innerHTML = rows;
+        }
+
+        // ---------- controls
+        $('start').onclick = start;
+        $('smoke').onchange = render;
+        $('nAsym').onclick = function () { if (running()) return; state.queue = 'asym'; save(); render(); };
+        $('nSym').onclick = function () { if (running()) return; state.queue = 'sym'; save(); render(); };
+        $('nClear').onclick = function () { if (running()) return; state.queue = null; save(); render(); };
+        var armed = false;
+        $('reset').onclick = function () {
+          if (running()) { $('resetNote').textContent = 'not while a session is running'; return; }
+          if (!armed) { armed = true; $('resetNote').textContent = 'click again to erase the tally and the log on this computer (download the log first)'; return; }
+          localStorage.removeItem(KEY); state = { queue: null, sessions: [] }; armed = false; $('resetNote').textContent = ''; render();
+        };
+        $('dl').onclick = function () {
+          var cols = ['lab_session', 'lab_n', 'started', 'finished', 'condition', 'pair_role', 'participant', 'status', 'data', 'filename', 'dry_run'];
+          var lines = [cols.join(',')];
+          for (var i = 0; i < state.sessions.length; i++) {
+            var h = state.sessions[i], vals = [h.id, h.lab_n, h.started, h.finished || '', h.cond, h.role, h.participant, h.status, h.upload, h.filename, h.smoke ? 1 : 0];
+            lines.push(vals.map(function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(','));
+          }
+          var blob = new Blob([lines.join('\n') + '\n'], { type: 'text/csv' }), a = document.createElement('a');
+          a.href = URL.createObjectURL(blob); a.download = 'lab_station_log_' + nowIso().slice(0, 10) + '.csv'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        };
+        render();
+      })();
+    </script>
+  </body>
+</html>
