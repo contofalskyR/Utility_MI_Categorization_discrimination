@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Recover locally backed-up data</title>
+    <style>body{font-family:system-ui,sans-serif;margin:2em;max-width:60em}table{border-collapse:collapse}td,th{border:1px solid #999;padding:.3em .6em}button{margin-right:.4em}</style>
+  </head>
+  <body>
+    <h1>Locally backed-up data files</h1>
+    <p>Every save keeps a copy of the CSV in this browser's localStorage (same origin as the experiment page). Use this page on the participant's computer if an upload failed.</p>
+    <table id="t"><thead><tr><th>file</th><th>saved</th><th>bytes</th><th></th></tr></thead><tbody></tbody></table>
+    <p id="none" hidden>No backups in this browser.</p>
+    <script type="module">
+      import { listBackups, downloadBackup, deleteBackup } from './datasaver.js';
+      function render() {
+        const rows = listBackups(); const tb = document.querySelector('#t tbody'); tb.innerHTML = '';
+        document.getElementById('none').hidden = rows.length > 0;
+        for (const r of rows) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${r.filename}</td><td>${r.saved || ''}</td><td>${r.bytes}</td><td><button data-d="${r.filename}">download</button><button data-x="${r.filename}">delete</button></td>`;
+          tb.appendChild(tr);
+        }
+      }
+      document.addEventListener('click', e => {
+        if (e.target.dataset.d) downloadBackup(e.target.dataset.d);
+        if (e.target.dataset.x && confirm('Delete backup ' + e.target.dataset.x + '?')) { deleteBackup(e.target.dataset.x); render(); }
+      });
+      render();
+    </script>
+  </body>
+</html>
